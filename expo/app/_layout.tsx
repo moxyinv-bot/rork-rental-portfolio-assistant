@@ -2,7 +2,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { PortfolioProvider } from "@/hooks/portfolio-store";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
@@ -45,13 +44,11 @@ export default function RootLayout() {
 
   return (
     <ErrorBoundary>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <QueryClientProvider client={queryClient}>
-          <PortfolioProvider>
-            <RootLayoutNav />
-          </PortfolioProvider>
-        </QueryClientProvider>
-      </GestureHandlerRootView>
+      <QueryClientProvider client={queryClient}>
+        <PortfolioProvider>
+          <RootLayoutNav />
+        </PortfolioProvider>
+      </QueryClientProvider>
     </ErrorBoundary>
   );
 }
