@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import { PortfolioProvider } from "@/hooks/portfolio-store";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
@@ -44,11 +45,13 @@ export default function RootLayout() {
 
   return (
     <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        <PortfolioProvider>
-          <RootLayoutNav />
-        </PortfolioProvider>
-      </QueryClientProvider>
+      <SafeAreaProvider>
+        <QueryClientProvider client={queryClient}>
+          <PortfolioProvider>
+            <RootLayoutNav />
+          </PortfolioProvider>
+        </QueryClientProvider>
+      </SafeAreaProvider>
     </ErrorBoundary>
   );
 }
