@@ -611,7 +611,7 @@ export default function PropertyDetailsScreen() {
                       </View>
                     )}
                     <Text style={styles.documentVendor}>{receipt.vendor || 'Unknown'}</Text>
-                    {receipt.amount && (
+                    {!!receipt.amount && (
                       <Text style={styles.documentAmount}>{formatCurrency(receipt.amount)}</Text>
                     )}
                   </View>

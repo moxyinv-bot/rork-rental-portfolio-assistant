@@ -317,7 +317,7 @@ export default function CreateLeaseDocumentScreen() {
               </Text>
               <Calendar size={16} color="#6B7280" />
             </TouchableOpacity>
-            {documentDate && (
+            {!!documentDate && (
               <TouchableOpacity
                 style={styles.clearDateButton}
                 onPress={() => setDocumentDate('')}

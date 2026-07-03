@@ -336,7 +336,7 @@ export default function DocumentsScreen() {
                     <Text style={styles.receiptVendor} numberOfLines={1}>
                       {receipt.vendor || 'Unknown Vendor'}
                     </Text>
-                    {receipt.amount && (
+                    {!!receipt.amount && (
                       <Text style={styles.receiptAmount}>{formatCurrency(receipt.amount)}</Text>
                     )}
                     <Text style={styles.receiptProperty} numberOfLines={1}>

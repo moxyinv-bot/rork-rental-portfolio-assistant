@@ -242,21 +242,21 @@ export default function LeaseDocumentScreen() {
                 <Text style={styles.metaText}>{property?.name || 'Unknown Property'}</Text>
               </View>
               
-              {folder && (
+              {!!folder && (
                 <View style={styles.metaRow}>
                   <Folder size={16} color="#6B7280" />
                   <Text style={styles.metaText}>{folder.name}</Text>
                 </View>
               )}
               
-              {document.tenantName && (
+              {!!document.tenantName && (
                 <View style={styles.metaRow}>
                   <User size={16} color="#6B7280" />
                   <Text style={styles.metaText}>{document.tenantName}</Text>
                 </View>
               )}
               
-              {document.dateOfDocument && (
+              {!!document.dateOfDocument && (
                 <View style={styles.metaRow}>
                   <Calendar size={16} color="#6B7280" />
                   <Text style={styles.metaText}>
@@ -342,7 +342,7 @@ export default function LeaseDocumentScreen() {
                   </Text>
                   <Calendar size={16} color="#6B7280" />
                 </TouchableOpacity>
-                {editDocumentDate && (
+                {!!editDocumentDate && (
                   <TouchableOpacity
                     style={styles.clearDateButton}
                     onPress={() => setEditDocumentDate('')}
@@ -395,7 +395,7 @@ export default function LeaseDocumentScreen() {
                 <Text style={styles.contentText}>{document.content}</Text>
               </View>
               
-              {document.notes && (
+              {!!document.notes && (
                 <>
                   <Text style={styles.contentTitle}>Notes</Text>
                   <View style={styles.notesContainer}>

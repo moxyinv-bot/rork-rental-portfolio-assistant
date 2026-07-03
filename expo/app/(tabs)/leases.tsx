@@ -275,7 +275,7 @@ export default function LeasesScreen() {
           <View style={styles.documentInfo}>
             <Text style={styles.documentTitle}>{document.title}</Text>
             <Text style={styles.documentProperty}>{property?.name || 'Unknown Property'}</Text>
-            {folder && (
+            {!!folder && (
               <View style={styles.documentFolderRow}>
                 <Folder size={12} color="#9CA3AF" />
                 <Text style={styles.documentFolder}>{folder.name}</Text>
@@ -289,7 +289,7 @@ export default function LeasesScreen() {
             <Text style={styles.documentType}>
               {document.type.charAt(0).toUpperCase() + document.type.slice(1)}
             </Text>
-            {document.tenantName && (
+            {!!document.tenantName && (
               <View style={styles.documentTenantRow}>
                 <Users size={12} color="#6B7280" />
                 <Text style={styles.documentTenant}>{document.tenantName}</Text>
@@ -297,7 +297,7 @@ export default function LeasesScreen() {
             )}
           </View>
           
-          {document.dateOfDocument && (
+          {!!document.dateOfDocument && (
             <View style={styles.documentDateRow}>
               <Calendar size={12} color="#6B7280" />
               <Text style={styles.documentDate}>

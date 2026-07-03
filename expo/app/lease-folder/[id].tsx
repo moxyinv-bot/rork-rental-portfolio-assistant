@@ -190,14 +190,14 @@ export default function LeaseFolderScreen() {
         </View>
         
         <View style={styles.documentMeta}>
-          {document.tenantName && (
+          {!!document.tenantName && (
             <View style={styles.documentTenantRow}>
               <Users size={12} color="#6B7280" />
               <Text style={styles.documentTenant}>{document.tenantName}</Text>
             </View>
           )}
           
-          {document.dateOfDocument && (
+          {!!document.dateOfDocument && (
             <View style={styles.documentTenantRow}>
               <Calendar size={12} color="#6B7280" />
               <Text style={styles.documentDate}>{new Date(document.dateOfDocument).toLocaleDateString()}</Text>
