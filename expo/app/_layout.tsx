@@ -1,16 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { PortfolioProvider } from "@/hooks/portfolio-store";
 import ErrorBoundary from "@/components/ErrorBoundary";
-
-try {
-  SplashScreen.preventAutoHideAsync();
-} catch (e) {
-  console.warn('SplashScreen.preventAutoHideAsync failed:', e);
-}
 
 const queryClient = new QueryClient();
 
@@ -35,13 +29,39 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  const [ready, setReady] = useState<boolean>(false);
+
   useEffect(() => {
-    try {
-      SplashScreen.hideAsync();
-    } catch (e) {
-      console.warn('SplashScreen.hideAsync failed:', e);
+    let isMounted = true;
+
+    async function prepare() {
+      try {
+        await SplashScreen.preventAutoHideAsync();
+        await new Promise(resolve => setTimeout(resolve, 50));
+      } catch (e) {
+        console.warn('SplashScreen.prepare failed:', e);
+      } finally {
+        if (isMounted) {
+          setReady(true);
+          try {
+            await SplashScreen.hideAsync();
+          } catch (e) {
+            console.warn('SplashScreen.hideAsync failed:', e);
+          }
+        }
+      }
     }
+
+    prepare();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
+
+  if (!ready) {
+    return null;
+  }
 
   return (
     <ErrorBoundary>
