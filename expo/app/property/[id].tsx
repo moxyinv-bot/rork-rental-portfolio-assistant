@@ -33,6 +33,8 @@ export default function PropertyDetailsScreen() {
   const [photoCaption, setPhotoCaption] = useState("");
   const [activeTab, setActiveTab] = useState<"overview" | "transactions" | "documents" | "reminders">("overview");
   const [showGallery, setShowGallery] = useState(false);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [viewerCaption, setViewerCaption] = useState<string>("");
   
   const property = properties.find(p => p.id === id);
 
@@ -220,7 +222,9 @@ export default function PropertyDetailsScreen() {
       {/* Header */}
       <View style={styles.header}>
         {!!property.imageUri && (
-          <Image source={{ uri: property.imageUri }} style={styles.propertyImage} />
+          <TouchableOpacity activeOpacity={0.9} onPress={() => { setViewerCaption(""); setViewerUri(property.imageUri!); }}>
+            <Image source={{ uri: property.imageUri }} style={styles.propertyImage} />
+          </TouchableOpacity>
         )}
         <View style={styles.headerContent}>
           <Text style={styles.propertyName}>{property.name}</Text>
@@ -301,7 +305,12 @@ export default function PropertyDetailsScreen() {
           ) : (
             <View style={styles.galleryGrid}>
               {photos.map(photo => (
-                <TouchableOpacity key={photo.id} style={styles.galleryItem} onLongPress={() => deletePhoto(photo.id)}>
+                <TouchableOpacity
+                  key={photo.id}
+                  style={styles.galleryItem}
+                  onPress={() => { setViewerCaption(photo.caption); setViewerUri(photo.uri); }}
+                  onLongPress={() => deletePhoto(photo.id)}
+                >
                   <Image source={{ uri: photo.uri }} style={styles.galleryImage} />
                   {photo.caption ? (
                     <View style={styles.galleryCaption}>
@@ -801,6 +810,27 @@ export default function PropertyDetailsScreen() {
 
 
       </View>
+
+      {/* Full-screen Photo Viewer */}
+      <Modal visible={!!viewerUri} animationType="fade" transparent onRequestClose={() => setViewerUri(null)}>
+        <View style={styles.viewerOverlay}>
+          <TouchableOpacity style={styles.viewerClose} onPress={() => setViewerUri(null)} hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}>
+            <X size={28} color="#FFFFFF" />
+          </TouchableOpacity>
+          {viewerUri && (
+            <Image
+              source={{ uri: viewerUri }}
+              style={styles.viewerImage}
+              resizeMode="contain"
+            />
+          )}
+          {viewerCaption ? (
+            <View style={styles.viewerCaptionBar}>
+              <Text style={styles.viewerCaptionText}>{viewerCaption}</Text>
+            </View>
+          ) : null}
+        </View>
+      </Modal>
 
       {/* Add Photo Modal */}
       <Modal visible={showPhotoModal} animationType="fade" transparent>
@@ -1418,5 +1448,42 @@ const styles = StyleSheet.create({
   gallerySection: {
     padding: 16,
     backgroundColor: "#F9FAFB",
+  },
+  viewerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.95)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  viewerClose: {
+    position: "absolute",
+    top: 56,
+    right: 20,
+    zIndex: 2,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  viewerImage: {
+    width: "100%",
+    height: "80%",
+  },
+  viewerCaptionBar: {
+    position: "absolute",
+    bottom: 60,
+    left: 24,
+    right: 24,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  viewerCaptionText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    textAlign: "center" as const,
   },
 });
