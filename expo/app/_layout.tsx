@@ -2,6 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
+import { Platform } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { PortfolioProvider } from "@/hooks/portfolio-store";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
@@ -42,7 +44,7 @@ export default function RootLayout() {
     }
   }, []);
 
-  return (
+  const content = (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <PortfolioProvider>
@@ -51,4 +53,17 @@ export default function RootLayout() {
       </QueryClientProvider>
     </ErrorBoundary>
   );
+
+  // GestureHandlerRootView is required on native for multi-touch gestures
+  // (pinch-to-zoom, etc.), but causes "Cannot find single active touch"
+  // crashes in the web preview. Only wrap on native platforms.
+  if (Platform.OS !== "web") {
+    return (
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        {content}
+      </GestureHandlerRootView>
+    );
+  }
+
+  return content;
 }
