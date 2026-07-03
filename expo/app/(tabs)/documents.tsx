@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { Plus, FileText, Tag, Calendar, Search, Filter, SortAsc, SortDesc, X } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePortfolio } from "@/hooks/portfolio-store";
 
 type SortOption = 'date-desc' | 'date-asc' | 'amount-desc' | 'amount-asc' | 'vendor-asc' | 'vendor-desc';
@@ -19,6 +20,7 @@ type DateFilter = 'all' | 'today' | 'week' | 'month' | 'year' | 'custom';
 
 export default function DocumentsScreen() {
   const { properties, receipts, isLoading } = usePortfolio();
+  const insets = useSafeAreaInsets();
   const [selectedProperty, setSelectedProperty] = useState<string>("all");
   const [searchTag, setSearchTag] = useState<string>("");
   const [searchText, setSearchText] = useState<string>("");
@@ -191,7 +193,7 @@ export default function DocumentsScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView style={[styles.container, { paddingTop: insets.top }]} showsVerticalScrollIndicator={false}>
       {/* Search and Filter Header */}
       <View style={styles.searchSection}>
         <View style={styles.searchInputContainer}>
