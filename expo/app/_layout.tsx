@@ -4,7 +4,6 @@ import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
 import { PortfolioProvider } from "@/hooks/portfolio-store";
 import ErrorBoundary from "@/components/ErrorBoundary";
-import GestureRoot from "@/components/GestureRoot";
 
 try {
   SplashScreen.preventAutoHideAsync();
@@ -46,11 +45,9 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <GestureRoot>
-          <PortfolioProvider>
-            <RootLayoutNav />
-          </PortfolioProvider>
-        </GestureRoot>
+        <PortfolioProvider>
+          <RootLayoutNav />
+        </PortfolioProvider>
       </QueryClientProvider>
     </ErrorBoundary>
   );
