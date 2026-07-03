@@ -276,7 +276,10 @@ export default function LeasesScreen() {
             <Text style={styles.documentTitle}>{document.title}</Text>
             <Text style={styles.documentProperty}>{property?.name || 'Unknown Property'}</Text>
             {folder && (
-              <Text style={styles.documentFolder}>📁 {folder.name}</Text>
+              <View style={styles.documentFolderRow}>
+                <Folder size={12} color="#9CA3AF" />
+                <Text style={styles.documentFolder}>{folder.name}</Text>
+              </View>
             )}
           </View>
         </View>
@@ -287,16 +290,20 @@ export default function LeasesScreen() {
               {document.type.charAt(0).toUpperCase() + document.type.slice(1)}
             </Text>
             {document.tenantName && (
-              <Text style={styles.documentTenant}>
-                <Users size={12} color="#6B7280" /> {document.tenantName}
-              </Text>
+              <View style={styles.documentTenantRow}>
+                <Users size={12} color="#6B7280" />
+                <Text style={styles.documentTenant}>{document.tenantName}</Text>
+              </View>
             )}
           </View>
           
           {document.dateOfDocument && (
-            <Text style={styles.documentDate}>
-              <Calendar size={12} color="#6B7280" /> {new Date(document.dateOfDocument).toLocaleDateString()}
-            </Text>
+            <View style={styles.documentDateRow}>
+              <Calendar size={12} color="#6B7280" />
+              <Text style={styles.documentDate}>
+                {new Date(document.dateOfDocument).toLocaleDateString()}
+              </Text>
+            </View>
           )}
           
           {document.tags.length > 0 && (
@@ -802,6 +809,12 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginBottom: 2,
   },
+  documentFolderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
   documentFolder: {
     fontSize: 12,
     color: '#9CA3AF',
@@ -824,16 +837,24 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 4,
   },
+  documentTenantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   documentTenant: {
     fontSize: 12,
     color: '#6B7280',
+  },
+  documentDateRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
   },
   documentDate: {
     fontSize: 12,
     color: '#6B7280',
-    marginBottom: 4,
   },
   tagsContainer: {
     flexDirection: 'row',
