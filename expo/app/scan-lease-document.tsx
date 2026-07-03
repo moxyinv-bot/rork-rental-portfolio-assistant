@@ -292,9 +292,10 @@ export default function ScanLeaseDocumentScreen() {
           <Text style={styles.sectionTitle}>Document Details</Text>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>
-              <FileText size={16} color="#6B7280" /> Title *
-            </Text>
+            <View style={styles.inputLabelRow}>
+              <FileText size={16} color="#6B7280" />
+              <Text style={styles.inputLabel}>Title *</Text>
+            </View>
             <TextInput
               style={styles.textInput}
               value={title}
@@ -305,9 +306,10 @@ export default function ScanLeaseDocumentScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>
-              <Type size={16} color="#6B7280" /> Document Type
-            </Text>
+            <View style={styles.inputLabelRow}>
+              <Type size={16} color="#6B7280" />
+              <Text style={styles.inputLabel}>Document Type</Text>
+            </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {DOCUMENT_TYPES.map(type => (
                 <TouchableOpacity
@@ -354,9 +356,10 @@ export default function ScanLeaseDocumentScreen() {
           {selectedProperty && (
             <View style={styles.inputGroup}>
               <View style={styles.folderHeader}>
-                <Text style={styles.inputLabel}>
-                  <Folder size={16} color="#6B7280" /> Folder *
-                </Text>
+                <View style={styles.inputLabelRow}>
+                  <Folder size={16} color="#6B7280" />
+                  <Text style={styles.inputLabel}>Folder *</Text>
+                </View>
                 <TouchableOpacity
                   style={styles.createFolderButton}
                   onPress={handleCreateFolder}
@@ -393,9 +396,10 @@ export default function ScanLeaseDocumentScreen() {
           )}
 
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>
-              <User size={16} color="#6B7280" /> Tenant Name
-            </Text>
+            <View style={styles.inputLabelRow}>
+              <User size={16} color="#6B7280" />
+              <Text style={styles.inputLabel}>Tenant Name</Text>
+            </View>
             <TextInput
               style={styles.textInput}
               value={tenantName}
@@ -406,9 +410,10 @@ export default function ScanLeaseDocumentScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>
-              <Calendar size={16} color="#6B7280" /> Document Date
-            </Text>
+            <View style={styles.inputLabelRow}>
+              <Calendar size={16} color="#6B7280" />
+              <Text style={styles.inputLabel}>Document Date</Text>
+            </View>
             <TouchableOpacity
               style={styles.datePickerButton}
               onPress={() => setShowDatePicker(true)}
@@ -433,9 +438,10 @@ export default function ScanLeaseDocumentScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>
-              <Tag size={16} color="#6B7280" /> Tags
-            </Text>
+            <View style={styles.inputLabelRow}>
+              <Tag size={16} color="#6B7280" />
+              <Text style={styles.inputLabel}>Tags</Text>
+            </View>
             <TextInput
               style={styles.textInput}
               value={tags}
@@ -656,6 +662,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500' as const,
     color: '#374151',
+  },
+  inputLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     marginBottom: 8,
   },
   textInput: {

@@ -191,15 +191,17 @@ export default function LeaseFolderScreen() {
         
         <View style={styles.documentMeta}>
           {document.tenantName && (
-            <Text style={styles.documentTenant}>
-              <Users size={12} color="#6B7280" /> {document.tenantName}
-            </Text>
+            <View style={styles.documentTenantRow}>
+              <Users size={12} color="#6B7280" />
+              <Text style={styles.documentTenant}>{document.tenantName}</Text>
+            </View>
           )}
           
           {document.dateOfDocument && (
-            <Text style={styles.documentDate}>
-              <Calendar size={12} color="#6B7280" /> {new Date(document.dateOfDocument).toLocaleDateString()}
-            </Text>
+            <View style={styles.documentTenantRow}>
+              <Calendar size={12} color="#6B7280" />
+              <Text style={styles.documentDate}>{new Date(document.dateOfDocument).toLocaleDateString()}</Text>
+            </View>
           )}
           
           {document.tags.length > 0 && (
@@ -564,8 +566,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B7280',
     marginBottom: 4,
+  },
+  documentTenantRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
   },
   documentDate: {
     fontSize: 12,
