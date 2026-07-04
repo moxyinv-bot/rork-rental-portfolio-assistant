@@ -15,7 +15,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "app.rork.rental-portfolio-assistant",
+      "bundleIdentifier": "app.rork.rentalportfolioassistant",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your photos",
         "NSCameraUsageDescription": "Allow $(PRODUCT_NAME) to access your camera",
@@ -28,7 +28,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "app.rork.rental-portfolio-assistant",
+      "package": "app.rork.rentalportfolioassistant",
       "permissions": [
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
