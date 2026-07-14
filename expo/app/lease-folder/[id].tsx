@@ -7,10 +7,10 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
-  SafeAreaView,
   Platform
 } from 'react-native';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Search,
   Plus,
@@ -331,7 +331,11 @@ export default function LeaseFolderScreen() {
         </ScrollView>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        contentContainerStyle={{ paddingBottom: 16 }}
+        showsVerticalScrollIndicator={false}
+      >
         {filteredDocuments.length === 0 ? (
           <View style={styles.emptyState}>
             <FileText size={64} color="#D1D5DB" />

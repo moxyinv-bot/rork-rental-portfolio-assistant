@@ -18,9 +18,11 @@ import { Receipt } from "@/types/property";
 import * as ImagePicker from "expo-image-picker";
 import { Camera, Tag, FileText, ChevronDown, Calendar } from "lucide-react-native";
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function AddReceiptScreen() {
   const { properties, addReceipt, saveReceiptWithLocation } = usePortfolio();
+  const insets = useSafeAreaInsets();
   const [showPropertyDropdown, setShowPropertyDropdown] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -133,7 +135,10 @@ export default function AddReceiptScreen() {
       style={styles.container} 
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+      >
         <View style={styles.form}>
           {/* Receipt Image */}
           <View style={styles.section}>

@@ -193,7 +193,11 @@ export default function DocumentsScreen() {
   };
 
   return (
-    <ScrollView style={[styles.container, { paddingTop: insets.top }]} showsVerticalScrollIndicator={false}>
+    <ScrollView 
+      style={[styles.container, { paddingTop: insets.top }]}
+      contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+      showsVerticalScrollIndicator={false}
+    >
       {/* Search and Filter Header */}
       <View style={styles.searchSection}>
         <View style={styles.searchInputContainer}>

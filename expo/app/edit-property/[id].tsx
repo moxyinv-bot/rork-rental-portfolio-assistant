@@ -16,9 +16,11 @@ import { Property } from "@/types/property";
 import { PROPERTY_TYPES } from "@/constants/categories";
 import * as ImagePicker from "expo-image-picker";
 import { Camera } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function EditPropertyScreen() {
   const { id } = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
   const { properties, updateProperty } = usePortfolio();
   
   const property = properties.find(p => p.id === id);
@@ -183,7 +185,10 @@ export default function EditPropertyScreen() {
       style={styles.container} 
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+      >
         <View style={styles.form}>
           {/* Basic Information */}
           <View style={styles.section}>

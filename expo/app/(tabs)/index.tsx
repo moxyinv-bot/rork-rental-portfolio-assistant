@@ -42,7 +42,11 @@ export default function DashboardScreen() {
   };
 
   return (
-    <ScrollView style={[styles.container, { paddingTop: insets.top }]} showsVerticalScrollIndicator={false}>
+    <ScrollView 
+      style={[styles.container, { paddingTop: insets.top }]}
+      contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+      showsVerticalScrollIndicator={false}
+    >
       {/* Portfolio Summary */}
       <View style={styles.summarySection}>
         <Text style={styles.sectionTitle}>Portfolio Overview</Text>

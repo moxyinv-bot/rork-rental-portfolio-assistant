@@ -16,9 +16,11 @@ import { Property } from "@/types/property";
 import { PROPERTY_TYPES } from "@/constants/categories";
 import * as ImagePicker from "expo-image-picker";
 import { Camera } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function AddPropertyScreen() {
   const { addProperty } = usePortfolio();
+  const insets = useSafeAreaInsets();
   
   const [formData, setFormData] = useState({
     name: "",
@@ -140,7 +142,10 @@ export default function AddPropertyScreen() {
       style={styles.container} 
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+      >
         <View style={styles.form}>
           {/* Basic Information */}
           <View style={styles.section}>

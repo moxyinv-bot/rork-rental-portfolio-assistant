@@ -442,7 +442,11 @@ export default function LeasesScreen() {
         </View>
       )}
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
+        showsVerticalScrollIndicator={false}
+      >
         {properties.length === 0 ? (
           <View style={styles.emptyState}>
             <Users size={64} color="#D1D5DB" />
@@ -608,7 +612,7 @@ export default function LeasesScreen() {
         </View>
       )}
 
-      <View style={styles.fab}>
+      <View style={[styles.fab, { bottom: insets.bottom + 24 }]}>
         <TouchableOpacity
           style={styles.fabButton}
           onPress={handleCreateDocument}

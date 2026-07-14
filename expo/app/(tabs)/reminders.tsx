@@ -122,7 +122,11 @@ export default function RemindersScreen() {
   };
 
   return (
-    <ScrollView style={[styles.container, { paddingTop: insets.top }]} showsVerticalScrollIndicator={false}>
+    <ScrollView 
+      style={[styles.container, { paddingTop: insets.top }]}
+      contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+      showsVerticalScrollIndicator={false}
+    >
       {/* Add Button */}
       <View style={styles.headerSection}>
         <TouchableOpacity

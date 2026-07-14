@@ -7,11 +7,11 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
-  SafeAreaView,
   Platform
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Stack, router } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   FileText,
   Folder,
@@ -176,7 +176,11 @@ export default function CreateLeaseDocumentScreen() {
         }} 
       />
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        contentContainerStyle={{ paddingBottom: 16 }}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.formSection}>
           <Text style={styles.sectionTitle}>Document Details</Text>
           

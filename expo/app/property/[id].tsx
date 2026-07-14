@@ -19,9 +19,11 @@ import * as ImagePicker from "expo-image-picker";
 import { Edit, Home, DollarSign, FileText, Bell, Plus, Trash2, Image as ImageIcon, Camera, X, MessageSquare, Mail, CalendarDays } from "lucide-react-native";
 import { Linking } from "react-native";
 import * as Calendar from "expo-calendar";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function PropertyDetailsScreen() {
   const { id } = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
   const { properties, deleteProperty, deleteReminder } = usePortfolio();
   const transactions = usePropertyTransactions(id as string);
   const receipts = usePropertyReceipts(id as string);
@@ -218,7 +220,11 @@ export default function PropertyDetailsScreen() {
   const netProfit = totalIncome - totalExpenses;
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView 
+      style={styles.container}
+      contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+      showsVerticalScrollIndicator={false}
+    >
       {/* Header */}
       <View style={styles.header}>
         {!!property.imageUri && (

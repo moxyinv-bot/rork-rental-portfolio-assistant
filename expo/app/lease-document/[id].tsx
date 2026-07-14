@@ -7,12 +7,12 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
-  SafeAreaView,
   Platform,
   ActivityIndicator
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Edit3,
   Save,
@@ -217,7 +217,11 @@ export default function LeaseDocumentScreen() {
         }} 
       />
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        contentContainerStyle={{ paddingBottom: 16 }}
+        showsVerticalScrollIndicator={false}
+      >
         {!isEditing && (
           <View style={styles.documentInfo}>
             <View style={styles.documentHeader}>

@@ -17,9 +17,11 @@ import { Transaction } from "@/types/property";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@/constants/categories";
 import { DollarSign, Tag, ChevronDown, Calendar } from "lucide-react-native";
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function AddTransactionScreen() {
   const { properties, addTransaction } = usePortfolio();
+  const insets = useSafeAreaInsets();
   const [showPropertyDropdown, setShowPropertyDropdown] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -102,7 +104,10 @@ export default function AddTransactionScreen() {
       style={styles.container} 
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+      >
         <View style={styles.form}>
           {/* Transaction Type */}
           <View style={styles.section}>

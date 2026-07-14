@@ -16,9 +16,11 @@ import { usePortfolio } from "@/hooks/portfolio-store";
 import { Reminder } from "@/types/property";
 import { REMINDER_TYPES } from "@/constants/categories";
 import { Calendar, Bell, ChevronDown, Phone, Mail, Trash2 } from "lucide-react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function EditReminderScreen() {
   const { id } = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
   const { properties, reminders, updateReminder, deleteReminder } = usePortfolio();
   const [showPropertyDropdown, setShowPropertyDropdown] = useState(false);
 
@@ -185,7 +187,10 @@ export default function EditReminderScreen() {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+      >
         <View style={styles.form}>
           {/* Property Selection */}
           <View style={styles.section}>
