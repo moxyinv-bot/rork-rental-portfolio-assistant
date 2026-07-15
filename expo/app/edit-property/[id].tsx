@@ -16,11 +16,10 @@ import { Property } from "@/types/property";
 import { PROPERTY_TYPES } from "@/constants/categories";
 import * as ImagePicker from "expo-image-picker";
 import { Camera } from "lucide-react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function EditPropertyScreen() {
   const { id } = useLocalSearchParams();
-  const insets = useSafeAreaInsets();
   const { properties, updateProperty } = usePortfolio();
   
   const property = properties.find(p => p.id === id);
@@ -181,13 +180,14 @@ export default function EditPropertyScreen() {
   };
 
   return (
+    <SafeAreaView style={styles.container} edges={["bottom"]}>
     <KeyboardAvoidingView 
-      style={styles.container} 
       behavior={Platform.OS === "ios" ? "padding" : "height"}
+      style={{ flex: 1 }}
     >
       <ScrollView 
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+        contentContainerStyle={{ paddingBottom: 16 }}
       >
         <View style={styles.form}>
           {/* Basic Information */}
@@ -501,6 +501,7 @@ export default function EditPropertyScreen() {
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 

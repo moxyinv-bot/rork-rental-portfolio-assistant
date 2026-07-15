@@ -24,7 +24,7 @@ import {
   Trash2
 } from 'lucide-react-native';
 import { usePortfolio, usePropertyLeaseFolders, usePropertyLeaseDocuments } from '@/hooks/portfolio-store';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LeaseFolder, LeaseDocument } from '@/types/property';
 
 const FOLDER_COLORS = [
@@ -47,7 +47,6 @@ const DOCUMENT_TYPE_COLORS = {
 
 export default function LeasesScreen() {
   const { properties, leaseFolders, leaseDocuments, addLeaseFolder, updateLeaseFolder, deleteLeaseFolder, isLoading } = usePortfolio();
-  const insets = useSafeAreaInsets();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProperty, setSelectedProperty] = useState<string>('all');
   const [selectedDocumentType, setSelectedDocumentType] = useState<string>('all');
@@ -335,7 +334,7 @@ export default function LeasesScreen() {
   }
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
 
       <View style={styles.toolbarContainer}>
         <View style={styles.headerButtons}>
@@ -444,7 +443,7 @@ export default function LeasesScreen() {
 
       <ScrollView 
         style={styles.content} 
-        contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
+        contentContainerStyle={{ paddingBottom: 120 }}
         showsVerticalScrollIndicator={false}
       >
         {properties.length === 0 ? (
@@ -612,7 +611,7 @@ export default function LeasesScreen() {
         </View>
       )}
 
-      <View style={[styles.fab, { bottom: insets.bottom + 24 }]}>
+      <View style={styles.fab}>
         <TouchableOpacity
           style={styles.fabButton}
           onPress={handleCreateDocument}
@@ -621,7 +620,7 @@ export default function LeasesScreen() {
           <Plus size={24} color="white" />
         </TouchableOpacity>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 

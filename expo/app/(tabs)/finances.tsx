@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { Plus, TrendingUp, TrendingDown, Filter, Calendar, Download } from "lucide-react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { usePortfolio } from "@/hooks/portfolio-store";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@/constants/categories";
 
@@ -29,7 +29,6 @@ const parseTransactionDate = (dateString: string): Date => {
 
 export default function FinancesScreen() {
   const { properties, transactions, isLoading, exportTransactionsToExcel } = usePortfolio();
-  const insets = useSafeAreaInsets();
   const [selectedProperty, setSelectedProperty] = useState<string>("all");
   const [selectedPeriod, setSelectedPeriod] = useState<"month" | "year" | "all">("month");
   const [showExportModal, setShowExportModal] = useState(false);
@@ -144,9 +143,9 @@ export default function FinancesScreen() {
   }, [transactions]);
 
   return (
+    <SafeAreaView style={styles.container} edges={["top"]}>
     <ScrollView 
-      style={[styles.container, { paddingTop: insets.top }]}
-      contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+      contentContainerStyle={{ paddingBottom: 100 }}
       showsVerticalScrollIndicator={false}
     >
       {/* Filters */}
@@ -387,6 +386,7 @@ export default function FinancesScreen() {
         </View>
       </Modal>
     </ScrollView>
+    </SafeAreaView>
   );
 }
 

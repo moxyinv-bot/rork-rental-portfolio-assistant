@@ -17,11 +17,10 @@ import { Transaction } from "@/types/property";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@/constants/categories";
 import { DollarSign, Tag, ChevronDown, Trash2, Calendar } from "lucide-react-native";
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function EditTransactionScreen() {
   const { id } = useLocalSearchParams();
-  const insets = useSafeAreaInsets();
   const { properties, transactions, updateTransaction, deleteTransaction } = usePortfolio();
   const [showPropertyDropdown, setShowPropertyDropdown] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -171,13 +170,14 @@ export default function EditTransactionScreen() {
   };
 
   return (
+    <SafeAreaView style={styles.container} edges={["bottom"]}>
     <KeyboardAvoidingView 
-      style={styles.container} 
       behavior={Platform.OS === "ios" ? "padding" : "height"}
+      style={{ flex: 1 }}
     >
       <ScrollView 
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+        contentContainerStyle={{ paddingBottom: 16 }}
       >
         <View style={styles.form}>
           {/* Transaction Type */}
@@ -373,6 +373,7 @@ export default function EditTransactionScreen() {
         />
       )}
     </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 

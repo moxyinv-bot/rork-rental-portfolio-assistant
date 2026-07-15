@@ -9,12 +9,11 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { Plus, Calendar, CheckCircle, AlertCircle, Clock } from "lucide-react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { usePortfolio } from "@/hooks/portfolio-store";
 import { REMINDER_TYPES } from "@/constants/categories";
 
 export default function RemindersScreen() {
-  const insets = useSafeAreaInsets();
   const { properties, reminders, updateReminder, isLoading } = usePortfolio();
 
   const groupedReminders = useMemo(() => {
@@ -122,9 +121,9 @@ export default function RemindersScreen() {
   };
 
   return (
+    <SafeAreaView style={styles.container} edges={["top"]}>
     <ScrollView 
-      style={[styles.container, { paddingTop: insets.top }]}
-      contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+      contentContainerStyle={{ paddingBottom: 100 }}
       showsVerticalScrollIndicator={false}
     >
       {/* Add Button */}
@@ -191,6 +190,7 @@ export default function RemindersScreen() {
         </View>
       )}
     </ScrollView>
+    </SafeAreaView>
   );
 }
 

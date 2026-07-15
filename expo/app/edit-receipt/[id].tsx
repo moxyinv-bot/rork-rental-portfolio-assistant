@@ -18,11 +18,10 @@ import { Receipt } from "@/types/property";
 import * as ImagePicker from "expo-image-picker";
 import { Camera, Tag, FileText, ChevronDown, Trash2, Calendar } from "lucide-react-native";
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function EditReceiptScreen() {
   const { id } = useLocalSearchParams();
-  const insets = useSafeAreaInsets();
   const { properties, receipts, updateReceipt, deleteReceipt } = usePortfolio();
   const [showPropertyDropdown, setShowPropertyDropdown] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -196,13 +195,14 @@ export default function EditReceiptScreen() {
   };
 
   return (
+    <SafeAreaView style={styles.container} edges={["bottom"]}>
     <KeyboardAvoidingView 
-      style={styles.container} 
       behavior={Platform.OS === "ios" ? "padding" : "height"}
+      style={{ flex: 1 }}
     >
       <ScrollView 
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+        contentContainerStyle={{ paddingBottom: 16 }}
       >
         <View style={styles.form}>
           {/* Receipt Image */}
@@ -388,6 +388,7 @@ export default function EditReceiptScreen() {
         />
       )}
     </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 

@@ -9,12 +9,11 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { Plus, TrendingUp, TrendingDown, Home, AlertCircle, DollarSign } from "lucide-react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { usePortfolio } from "@/hooks/portfolio-store";
 
 export default function DashboardScreen() {
   const { properties, portfolioMetrics, upcomingReminders, isLoading } = usePortfolio();
-  const insets = useSafeAreaInsets();
 
   if (isLoading) {
     return (
@@ -42,9 +41,9 @@ export default function DashboardScreen() {
   };
 
   return (
+    <SafeAreaView style={styles.container} edges={["top"]}>
     <ScrollView 
-      style={[styles.container, { paddingTop: insets.top }]}
-      contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+      contentContainerStyle={{ paddingBottom: 100 }}
       showsVerticalScrollIndicator={false}
     >
       {/* Portfolio Summary */}
@@ -197,6 +196,7 @@ export default function DashboardScreen() {
         )}
       </View>
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
