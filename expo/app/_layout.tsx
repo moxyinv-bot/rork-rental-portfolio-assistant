@@ -1,9 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
+import { Stack, router } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect, useState } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { ActivityIndicator, View } from "react-native";
 import { PortfolioProvider } from "@/hooks/portfolio-store";
+import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { HouseholdProvider } from "@/hooks/useHousehold";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
 const queryClient = new QueryClient();
@@ -11,6 +14,7 @@ const queryClient = new QueryClient();
 function RootLayoutNav() {
   return (
     <Stack screenOptions={{ headerBackTitle: "Back" }}>
+      <Stack.Screen name="login" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="property/[id]" options={{ title: "Property Details" }} />
       <Stack.Screen name="add-property" options={{ title: "Add Property", presentation: "modal" }} />
@@ -26,6 +30,30 @@ function RootLayoutNav() {
       <Stack.Screen name="lease-document/[id]" options={{ title: "Lease Document" }} />
     </Stack>
   );
+}
+
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const { user, isLoading } = useAuth();
+
+  useEffect(() => {
+    if (!isLoading) {
+      if (user) {
+        router.replace("/(tabs)" as any);
+      } else {
+        router.replace("/login" as any);
+      }
+    }
+  }, [user, isLoading]);
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#0F172A" }}>
+        <ActivityIndicator size="large" color="#3B82F6" />
+      </View>
+    );
+  }
+
+  return <>{children}</>;
 }
 
 export default function RootLayout() {
@@ -67,9 +95,15 @@ export default function RootLayout() {
     <ErrorBoundary>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
-          <PortfolioProvider>
-            <RootLayoutNav />
-          </PortfolioProvider>
+          <AuthProvider>
+            <HouseholdProvider>
+              <PortfolioProvider>
+                <AuthGate>
+                  <RootLayoutNav />
+                </AuthGate>
+              </PortfolioProvider>
+            </HouseholdProvider>
+          </AuthProvider>
         </QueryClientProvider>
       </SafeAreaProvider>
     </ErrorBoundary>
