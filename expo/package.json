@@ -46,5 +46,8 @@
     "eslint-config-expo": "9.2.0",
     "typescript": "~5.9.2"
   },
-  "private": true
+  "private": true,
+  "patchedDependencies": {
+    "@ai-sdk/provider-utils@3.0.31": "patches/@ai-sdk%2Fprovider-utils@3.0.31.patch"
+  }
 }

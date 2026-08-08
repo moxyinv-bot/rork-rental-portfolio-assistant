@@ -1,0 +1,26 @@
+diff --git a/dist/index.js b/dist/index.js
+index 5da19107b9d3afd4346a3fc51bd2a665140168bd..ead366ee0351b2e599b73138b0604dabfd2a4b05 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -500,7 +500,7 @@ async function loadNodeModule(id) {
+   return builtinModule == null ? await importNodeModule(id) : builtinModule;
+ }
+ function importNodeModule(id) {
+-  return import(id);
++  return Promise.resolve(null);
+ }
+ function getCurrentModulePath() {
+   const originalPrepareStackTrace = Error.prepareStackTrace;
+diff --git a/dist/index.mjs b/dist/index.mjs
+index c37ee32da89adc0c2fc629db5957b00a0fe705db..b46b67063fad5f015ae7ae159262f3a6c8f7b62a 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -399,7 +399,7 @@ async function loadNodeModule(id) {
+   return builtinModule == null ? await importNodeModule(id) : builtinModule;
+ }
+ function importNodeModule(id) {
+-  return import(id);
++  return Promise.resolve(null);
+ }
+ function getCurrentModulePath() {
+   const originalPrepareStackTrace = Error.prepareStackTrace;
