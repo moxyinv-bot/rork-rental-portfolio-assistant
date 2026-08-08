@@ -5,9 +5,12 @@ import * as Linking from "expo-linking";
 import * as SecureStore from "expo-secure-store";
 import { supabase } from "@/lib/supabase";
 
-const AUTH_URL = process.env.EXPO_PUBLIC_RORK_AUTH_URL!;
-const APP_KEY = process.env.EXPO_PUBLIC_RORK_APP_KEY!;
-const PROJECT_ID = process.env.EXPO_PUBLIC_PROJECT_ID!;
+// Baked-in Rork platform configuration so standalone builds (EAS APKs) work
+// without any environment variables. These are public client values — they
+// ship inside every app bundle by design.
+const AUTH_URL = "https://api.rork.com";
+const APP_KEY = "rpk_gms3l8hj9cag5cfau127pccgjtac3jne";
+const PROJECT_ID = "7qnyyg8myr2908b1ajb2f";
 
 function generateCodeVerifier(): string {
   const bytes = new Uint8Array(32);

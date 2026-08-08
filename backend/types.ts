@@ -589,6 +589,23 @@ export type Database = {
     Functions: {
       is_household_member: { Args: { hhid: string }; Returns: boolean }
       is_household_owner: { Args: { hhid: string }; Returns: boolean }
+      join_household_by_invite: {
+        Args: { code: string }
+        Returns: {
+          created_at: string | null
+          created_by: string
+          id: string
+          invite_code: string | null
+          name: string
+          updated_at: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "households"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       user_id: { Args: never; Returns: string }
     }
     Enums: {

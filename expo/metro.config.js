@@ -1,11 +1,6 @@
 const { getDefaultConfig } = require("expo/metro-config");
-const path = require("path");
+const { withRorkMetro } = require("@rork-ai/toolkit-sdk/metro");
 
 const config = getDefaultConfig(__dirname);
 
-config.transformer.babelTransformerPath = path.resolve(
-  __dirname,
-  "scripts/metro-transformer.js"
-);
-
-module.exports = config;
+module.exports = withRorkMetro(config);

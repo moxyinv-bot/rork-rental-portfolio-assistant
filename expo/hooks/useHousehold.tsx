@@ -74,11 +74,28 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
       // Check for stored active household
       const storedId = await AsyncStorage.getItem(ACTIVE_HOUSEHOLD_KEY);
 
-      // Find all households the user is a member of
-      const { data: memberships, error: memErr } = await supabase
-        .from('household_members')
-        .select('household_id')
-        .eq('user_id', user.id);
+      // Find all households the user is a member of.
+      // Retries PGRST303 ("JWT issued at future"): brief clock skew between
+      // the auth server and the database right after sign-in.
+      let memberships: { household_id: string }[] | null = null;
+      let memErr: { code?: string; message?: string } | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const res = await supabase
+          .from('household_members')
+          .select('household_id')
+          .eq('user_id', user.id);
+        if (!res.error) {
+          memberships = res.data;
+          memErr = null;
+          break;
+        }
+        memErr = res.error;
+        if (res.error.code === 'PGRST303') {
+          await new Promise<void>((resolve) => setTimeout(resolve, 1500 * (attempt + 1)));
+          continue;
+        }
+        break;
+      }
 
       if (memErr) throw memErr;
 
@@ -98,8 +115,11 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
       await loadMembers(targetId);
       await AsyncStorage.setItem(ACTIVE_HOUSEHOLD_KEY, targetId);
     } catch (err) {
-      console.error('Error loading household:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load household');
+      console.error('Error loading household:', JSON.stringify(err));
+      const message = err instanceof Error
+        ? err.message
+        : (err as { message?: string })?.message ?? 'Failed to load household';
+      setError(message);
     } finally {
       setIsLoading(false);
     }
@@ -113,7 +133,7 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
       .single();
 
     if (err) {
-      console.error('Error loading household data:', err);
+      console.error('Error loading household data:', JSON.stringify(err));
       return;
     }
     setHousehold(data as Household);
@@ -134,7 +154,7 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
       .order('joined_at', { ascending: true });
 
     if (err) {
-      console.error('Error loading members:', err);
+      console.error('Error loading members:', JSON.stringify(err));
       return;
     }
 
@@ -193,40 +213,31 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
     try {
       setError(null);
 
-      const { data: householdData, error: findErr } = await supabase
-        .from('households')
-        .select('*')
-        .eq('invite_code', inviteCode.toUpperCase().trim())
-        .single();
+      // Non-members cannot look up households by invite code under RLS, so
+      // joining goes through a SECURITY DEFINER function that finds the code
+      // and inserts the membership atomically (idempotent if already a member).
+      const { data, error: joinErr } = await supabase.rpc('join_household_by_invite', {
+        code: inviteCode,
+      });
 
-      if (findErr) {
+      if (joinErr) throw joinErr;
+
+      const householdData = (Array.isArray(data) ? data[0] : data) as Household | undefined;
+      if (!householdData) {
         setError('Invalid invite code');
         return null;
       }
 
-      const { error: memberErr } = await supabase
-        .from('household_members')
-        .insert({
-          household_id: householdData.id,
-          user_id: user.id,
-          role: 'member',
-        });
-
-      if (memberErr) {
-        if (memberErr.code === '23505') {
-          setError('You are already a member of this household');
-        } else {
-          throw memberErr;
-        }
-      }
-
       await AsyncStorage.setItem(ACTIVE_HOUSEHOLD_KEY, householdData.id);
-      setHousehold(householdData as Household);
+      setHousehold(householdData);
       await loadMembers(householdData.id);
-      return householdData as Household;
+      return householdData;
     } catch (err) {
-      console.error('Error joining household:', err);
-      setError(err instanceof Error ? err.message : 'Failed to join household');
+      console.error('Error joining household:', JSON.stringify(err));
+      const message = err instanceof Error
+        ? err.message
+        : (err as { message?: string })?.message ?? 'Failed to join household';
+      setError(message);
       return null;
     }
   }, [user, loadMembers]);
