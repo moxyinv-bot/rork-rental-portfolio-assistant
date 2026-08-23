@@ -6,12 +6,46 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
+  Linking,
+  Platform,
 } from "react-native";
 import { router } from "expo-router";
-import { Plus, Calendar, CheckCircle, AlertCircle, Clock } from "lucide-react-native";
+import { Plus, Calendar, CheckCircle, AlertCircle, Clock, MessageSquare } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { usePortfolio } from "@/hooks/portfolio-store";
 import { REMINDER_TYPES } from "@/constants/categories";
+
+const parseReminderDate = (value: string): Date => {
+  if (!value) return new Date(NaN);
+
+  const normalized = value.replace(/\//g, '-');
+  const parts = normalized.split('-');
+
+  if (parts.length === 3) {
+    const [a, b, c] = parts;
+    const n1 = parseInt(a, 10);
+    const n2 = parseInt(b, 10);
+    const n3 = parseInt(c, 10);
+
+    if (!Number.isNaN(n1) && !Number.isNaN(n2) && !Number.isNaN(n3)) {
+      // MM-DD-YY or MM-DD-YYYY
+      if (a.length <= 2) {
+        const month = n1 - 1;
+        const day = n2;
+        const year = c.length === 2 ? n3 + 2000 : n3;
+        return new Date(year, month, day);
+      }
+
+      // YYYY-MM-DD
+      if (a.length === 4) {
+        return new Date(n1, n2 - 1, n3);
+      }
+    }
+  }
+
+  return new Date(value);
+};
 
 export default function RemindersScreen() {
   const { properties, reminders, updateReminder, isLoading } = usePortfolio();
@@ -28,7 +62,7 @@ export default function RemindersScreen() {
       if (reminder.completed) {
         completed.push(reminder);
       } else {
-        const dueDate = new Date(reminder.dueDate);
+        const dueDate = parseReminderDate(reminder.dueDate);
         dueDate.setHours(0, 0, 0, 0);
         
         if (dueDate < today) {
@@ -40,9 +74,9 @@ export default function RemindersScreen() {
     });
     
     return {
-      overdue: overdue.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()),
-      upcoming: upcoming.sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()),
-      completed: completed.sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime()),
+      overdue: overdue.sort((a, b) => parseReminderDate(a.dueDate).getTime() - parseReminderDate(b.dueDate).getTime()),
+      upcoming: upcoming.sort((a, b) => parseReminderDate(a.dueDate).getTime() - parseReminderDate(b.dueDate).getTime()),
+      completed: completed.sort((a, b) => parseReminderDate(b.dueDate).getTime() - parseReminderDate(a.dueDate).getTime()),
     };
   }, [reminders]);
 
@@ -55,7 +89,8 @@ export default function RemindersScreen() {
   }
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
+    const date = parseReminderDate(dateString);
+    if (Number.isNaN(date.getTime())) return dateString;
     const today = new Date();
     const diffTime = date.getTime() - today.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -78,8 +113,53 @@ export default function RemindersScreen() {
     return reminderType?.color || '#6B7280';
   };
 
-  const toggleComplete = (reminderId: string, currentStatus: boolean) => {
-    updateReminder(reminderId, { completed: !currentStatus });
+  const toggleComplete = async (reminderId: string, currentStatus: boolean) => {
+    try {
+      await updateReminder(reminderId, { completed: !currentStatus });
+    } catch (error) {
+      console.error('Error updating reminder completion:', error);
+      const message = error instanceof Error ? error.message : 'Failed to update reminder. Please try again.';
+      Alert.alert('Error', message);
+    }
+  };
+
+  const openReminderEditor = (reminderId: string) => {
+    router.push(`/edit-reminder/${reminderId}` as any);
+  };
+
+  const sendReminderSms = async (reminder: typeof reminders[0]) => {
+    const targetPhone = reminder.recipientPhone?.trim();
+    if (!targetPhone) {
+      Alert.alert("Missing phone number", "This reminder does not have a recipient phone number.");
+      return;
+    }
+
+    const property = properties.find(p => p.id === reminder.propertyId);
+    const messageParts = [
+      `Reminder: ${reminder.title}`,
+      `Due: ${reminder.dueDate}`,
+      property?.name ? `Property: ${property.name}` : "",
+      reminder.notes?.trim() ? `Notes: ${reminder.notes.trim()}` : "",
+    ].filter(Boolean);
+
+    const body = encodeURIComponent(messageParts.join("\n"));
+    const phone = encodeURIComponent(targetPhone);
+    const smsUrl = Platform.OS === "ios"
+      ? `sms:${phone}&body=${body}`
+      : `sms:${phone}?body=${body}`;
+
+    try {
+      const canOpen = await Linking.canOpenURL(smsUrl);
+      if (!canOpen) {
+        Alert.alert("SMS unavailable", "Your device cannot open the SMS composer.");
+        return;
+      }
+
+      await Linking.openURL(smsUrl);
+    } catch (error) {
+      console.error("Failed to open SMS composer:", error);
+      Alert.alert("SMS unavailable", "Could not open the SMS composer.");
+    }
   };
 
   const ReminderCard = ({ reminder }: { reminder: typeof reminders[0] }) => {
@@ -89,7 +169,7 @@ export default function RemindersScreen() {
     return (
       <TouchableOpacity
         style={[styles.reminderCard, reminder.completed && styles.reminderCardCompleted]}
-        onPress={() => toggleComplete(reminder.id, reminder.completed)}
+        onPress={() => openReminderEditor(reminder.id)}
       >
         <View style={[styles.reminderIndicator, { backgroundColor: typeColor }]} />
         <View style={styles.reminderContent}>
@@ -97,11 +177,16 @@ export default function RemindersScreen() {
             <Text style={[styles.reminderTitle, reminder.completed && styles.reminderTitleCompleted]}>
               {reminder.title}
             </Text>
-            {reminder.completed ? (
-              <CheckCircle size={20} color="#10B981" />
-            ) : (
-              <View style={[styles.checkbox, { borderColor: typeColor }]} />
-            )}
+            <TouchableOpacity
+              style={styles.statusToggleButton}
+              onPress={() => toggleComplete(reminder.id, reminder.completed)}
+            >
+              {reminder.completed ? (
+                <CheckCircle size={20} color="#10B981" />
+              ) : (
+                <View style={[styles.checkbox, { borderColor: typeColor }]} />
+              )}
+            </TouchableOpacity>
           </View>
           <Text style={styles.reminderProperty}>{property?.name || 'Unknown Property'}</Text>
           <View style={styles.reminderFooter}>
@@ -115,6 +200,16 @@ export default function RemindersScreen() {
           {!!reminder.notes && (
             <Text style={styles.reminderNotes}>{reminder.notes}</Text>
           )}
+          {reminder.recipientPhone ? (
+            <TouchableOpacity
+              style={styles.sendNowButton}
+              onPress={() => sendReminderSms(reminder)}
+            >
+              <MessageSquare size={14} color="#2563EB" />
+              <Text style={styles.sendNowButtonText}>Send Message Now</Text>
+            </TouchableOpacity>
+          ) : null}
+          <Text style={styles.editHintText}>Tap card to edit or delete</Text>
         </View>
       </TouchableOpacity>
     );
@@ -264,6 +359,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 4,
   },
+  statusToggleButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
   reminderTitle: {
     fontSize: 15,
     fontWeight: "600" as const,
@@ -312,6 +411,29 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     marginTop: 8,
     fontStyle: "italic" as const,
+  },
+  sendNowButton: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#2563EB",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "#EFF6FF",
+  },
+  sendNowButtonText: {
+    fontSize: 12,
+    fontWeight: "600" as const,
+    color: "#2563EB",
+  },
+  editHintText: {
+    fontSize: 11,
+    color: "#9CA3AF",
+    marginTop: 8,
   },
   emptyState: {
     alignItems: "center",

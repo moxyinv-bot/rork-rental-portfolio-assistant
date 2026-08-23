@@ -36,6 +36,9 @@ yarn-error.*
 *.tsbuildinfo
 .vercel
 
+# local scratch/debug output and secrets
+tmp/
+
 ios/
 android/
 .rork

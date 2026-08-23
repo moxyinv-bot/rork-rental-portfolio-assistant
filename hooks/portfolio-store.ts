@@ -8,6 +8,11 @@ import * as Sharing from 'expo-sharing';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 import { useHousehold } from '@/hooks/useHousehold';
+import {
+  cancelLocalReminderNotification,
+  scheduleLocalReminderNotification,
+  syncLocalReminderNotification,
+} from '@/lib/reminder-notifications';
 
 // Legacy AsyncStorage keys for migration
 const LEGACY_KEYS = {
@@ -22,6 +27,17 @@ const LEGACY_KEYS = {
 
 const MIGRATION_DONE_KEY = 'portfolio_migration_done';
 
+const PROPERTY_MEDIA_BUCKET = 'property-photos';
+const RECEIPT_MEDIA_BUCKET = 'receipt-images';
+const LEASE_MEDIA_BUCKET = 'lease-documents';
+
+const isBucketMissingError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /bucket\s*not\s*found|not\s*found\s*bucket|bucket.*does not exist/i.test(message);
+};
+
+const getSingleBucketList = (bucketName: string): string[] => [bucketName];
+
 const parseTransactionDate = (dateString: string): Date => {
   const parts = dateString.split('-');
   if (parts.length === 3) {
@@ -32,6 +48,132 @@ const parseTransactionDate = (dateString: string): Date => {
   }
   return new Date(dateString);
 };
+
+const parseFlexibleDate = (value: string): Date => {
+  if (!value) return new Date(NaN);
+
+  const normalized = value.replace(/\//g, '-');
+  const parts = normalized.split('-');
+
+  if (parts.length === 3) {
+    const [a, b, c] = parts;
+    const n1 = parseInt(a, 10);
+    const n2 = parseInt(b, 10);
+    const n3 = parseInt(c, 10);
+
+    if (!Number.isNaN(n1) && !Number.isNaN(n2) && !Number.isNaN(n3)) {
+      // MM-DD-YY or MM-DD-YYYY
+      if (a.length <= 2) {
+        const year = c.length === 2 ? n3 + 2000 : n3;
+        return new Date(year, n1 - 1, n2);
+      }
+
+      // YYYY-MM-DD
+      if (a.length === 4) {
+        return new Date(n1, n2 - 1, n3);
+      }
+    }
+  }
+
+  return new Date(value);
+};
+
+const normalizeReminderDueDate = (value: string): string => {
+  const parsed = parseFlexibleDate(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getMimeTypeFromUri = (uri: string): string => {
+  const normalized = uri.toLowerCase();
+  if (normalized.endsWith('.png')) return 'image/png';
+  if (normalized.endsWith('.webp')) return 'image/webp';
+  if (normalized.endsWith('.heic')) return 'image/heic';
+  return 'image/jpeg';
+};
+
+const getFileExtensionFromUri = (uri: string): string => {
+  const cleanUri = uri.split('?')[0].split('#')[0];
+  const parts = cleanUri.split('.');
+  if (parts.length > 1) return parts[parts.length - 1].toLowerCase();
+  return 'jpg';
+};
+
+async function uploadImageToStorage(localUri: string, buckets: string[], householdId: string, prefix: string): Promise<string> {
+  if (!localUri) return localUri;
+  if (Platform.OS === 'web') return localUri;
+  if (localUri.startsWith('http://') || localUri.startsWith('https://')) return localUri;
+
+  const mimeType = getMimeTypeFromUri(localUri);
+  const ext = getFileExtensionFromUri(localUri);
+  const path = `${householdId}/${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${ext}`;
+  const response = await fetch(localUri);
+  const arrayBuffer = await response.arrayBuffer();
+
+  const orderedBuckets = getSingleBucketList(buckets[0] ?? PROPERTY_MEDIA_BUCKET);
+  let lastError: unknown = null;
+
+  for (const bucket of orderedBuckets) {
+    const { error } = await supabase.storage.from(bucket).upload(path, arrayBuffer, {
+      contentType: mimeType,
+      upsert: true,
+    });
+
+    if (!error) {
+      const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+      if (data?.publicUrl) return data.publicUrl;
+      throw new Error(`Upload succeeded but public URL could not be generated for bucket ${bucket}.`);
+    }
+
+    if (isBucketMissingError(error)) {
+      throw new Error(`Storage bucket not found: ${bucket}. Create the bucket in Supabase Storage and make it public.`);
+    }
+
+    lastError = error;
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Failed to upload image to storage.');
+}
+
+async function uploadImageToStorageForProperty(localUri: string, buckets: string[], householdId: string, propertyId: string, prefix: string): Promise<string> {
+  if (!localUri) return localUri;
+  if (Platform.OS === 'web') return localUri;
+  if (localUri.startsWith('http://') || localUri.startsWith('https://')) return localUri;
+
+  const mimeType = getMimeTypeFromUri(localUri);
+  const ext = getFileExtensionFromUri(localUri);
+  const path = `${householdId}/${propertyId}/${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${ext}`;
+  const response = await fetch(localUri);
+  const arrayBuffer = await response.arrayBuffer();
+
+  const orderedBuckets = getSingleBucketList(buckets[0] ?? PROPERTY_MEDIA_BUCKET);
+  let lastError: unknown = null;
+
+  for (const bucket of orderedBuckets) {
+    const { error } = await supabase.storage.from(bucket).upload(path, arrayBuffer, {
+      contentType: mimeType,
+      upsert: true,
+    });
+
+    if (!error) {
+      const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+      if (data?.publicUrl) return data.publicUrl;
+      throw new Error(`Upload succeeded but public URL could not be generated for bucket ${bucket}.`);
+    }
+
+    if (isBucketMissingError(error)) {
+      throw new Error(`Storage bucket not found: ${bucket}. Create the bucket in Supabase Storage and make it public.`);
+    }
+
+    lastError = error;
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Failed to upload image to property storage.');
+}
 
 // Convert DB rows to app types
 function dbToProperty(row: any): Property {
@@ -69,6 +211,174 @@ function dbToProperty(row: any): Property {
   };
 }
 
+const formatSupabaseError = (error: any): string => {
+  const code = error?.code ? ` (${error.code})` : '';
+  const details = error?.details ? ` Details: ${error.details}` : '';
+  const hint = error?.hint ? ` Hint: ${error.hint}` : '';
+  const message = error?.message || 'Unknown database error';
+  return `${message}${code}${details}${hint}`;
+};
+
+const extractMissingColumn = (error: any): string | null => {
+  const message = String(error?.message || '');
+
+  // PostgREST schema cache error: could not find the 'col' column of 'table'
+  const pgrstMatch = message.match(/could not find the '([^']+)' column/i);
+  if (pgrstMatch?.[1]) return pgrstMatch[1];
+
+  // PostgreSQL: column "col" does not exist
+  const pgMatch = message.match(/column\s+"([^"]+)"\s+does not exist/i);
+  if (pgMatch?.[1]) return pgMatch[1];
+
+  return null;
+};
+
+const NON_DROPPABLE_PROPERTY_COLUMNS = new Set<string>([
+  'household_id',
+  'user_id',
+  'name',
+  'address',
+  'type',
+  'purchase_date',
+  'purchase_price',
+  'monthly_rent',
+]);
+
+const compactPayload = (payload: Record<string, any>): Record<string, any> => {
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (value !== undefined && value !== null) {
+      result[key] = value;
+    }
+  }
+  return result;
+};
+
+const TABLE_COLUMN_ALLOWLIST: Record<string, Set<string>> = {
+  properties: new Set([
+    'id', 'household_id', 'user_id', 'name', 'address', 'type', 'purchase_date', 'purchase_price', 'current_value',
+    'monthly_rent', 'tenant_name', 'tenant_contact', 'lease_start', 'lease_end', 'mortgage_amount', 'mortgage_payment',
+    'mortgage_renewal_date', 'insurance_provider', 'insurance_policy', 'insurance_renewal_date', 'insurance_premium',
+    'property_tax', 'ac_capacitor_size', 'ac_filter_size', 'paint_colors_inside', 'paint_colors_outside',
+    'water_heater_info', 'appliance_info', 'notes', 'image_uri', 'created_at', 'updated_at'
+  ]),
+  transactions: new Set([
+    'id', 'user_id', 'household_id', 'property_id', 'type', 'category', 'amount', 'tx_date', 'description', 'receipt_uri', 'tags',
+    'created_at', 'updated_at'
+  ]),
+  receipts: new Set([
+    'id', 'user_id', 'household_id', 'property_id', 'transaction_id', 'uri', 'receipt_date', 'amount', 'vendor', 'category', 'tags', 'notes',
+    'created_at', 'updated_at'
+  ]),
+  reminders: new Set([
+    'id', 'user_id', 'household_id', 'property_id', 'type', 'title', 'due_date', 'notes', 'completed', 'recipient_phone',
+    'recipient_email', 'created_at', 'updated_at'
+  ]),
+  lease_folders: new Set([
+    'id', 'user_id', 'household_id', 'property_id', 'name', 'color', 'created_at', 'updated_at'
+  ]),
+  lease_documents: new Set([
+    'id', 'user_id', 'household_id', 'property_id', 'folder_id', 'type', 'title', 'content', 'original_image_uri', 'tags',
+    'tenant_name', 'date_of_document', 'notes', 'created_at', 'updated_at'
+  ]),
+  property_photos: new Set([
+    'id', 'user_id', 'property_id', 'uri', 'caption', 'created_at', 'updated_at'
+  ]),
+};
+
+const sanitizeTablePayload = (tableName: string, payload: Record<string, any>): Record<string, any> => {
+  const allowList = TABLE_COLUMN_ALLOWLIST[tableName];
+  if (!allowList) return compactPayload(payload);
+
+  const filtered: Record<string, any> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (allowList.has(key) && value !== undefined && value !== null) {
+      filtered[key] = value;
+    }
+  }
+  return filtered;
+};
+
+const retryMissingColumnOperation = async <T>(
+  tableName: string,
+  payload: Record<string, any>,
+  operation: 'insert' | 'update',
+  idValue?: string,
+  selectFields = '*'
+): Promise<{ data: T | null; error: any }> => {
+  let currentPayload = sanitizeTablePayload(tableName, payload);
+  const seen = new Set<string>();
+  let lastError: any = null;
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    let query = supabase.from(tableName);
+    if (operation === 'insert') {
+      query = query.insert(currentPayload as any);
+    } else {
+      query = query.update(currentPayload as any);
+      if (idValue) {
+        query = query.eq('id', idValue) as any;
+      }
+    }
+
+    const result = operation === 'insert'
+      ? await query.select(selectFields).single()
+      : await query.select(selectFields).single();
+
+    if (!result.error) {
+      return { data: result.data as T, error: null };
+    }
+
+    lastError = result.error;
+    const missingColumn = extractMissingColumn(result.error);
+    if (!missingColumn || !Object.prototype.hasOwnProperty.call(currentPayload, missingColumn)) {
+      break;
+    }
+
+    const signature = `${missingColumn}:${Object.keys(currentPayload).sort().join(',')}`;
+    if (seen.has(signature)) break;
+    seen.add(signature);
+
+    delete currentPayload[missingColumn];
+    if (Object.keys(currentPayload).length === 0) break;
+  }
+
+  return { data: null, error: lastError };
+};
+
+const fetchTableRows = async (tableName: string, options?: { filterKey?: string; filterValue?: string; orderBy?: { column: string; ascending?: boolean } }): Promise<any[]> => {
+  let query = supabase.from(tableName).select('*');
+  if (options?.filterKey && options.filterValue !== undefined) {
+    query = query.eq(options.filterKey, options.filterValue) as any;
+  }
+  if (options?.orderBy) {
+    query = query.order(options.orderBy.column, { ascending: options.orderBy.ascending ?? true }) as any;
+  }
+
+  const { data, error } = await query;
+  if (!error) return data ?? [];
+
+  const missingColumn = extractMissingColumn(error);
+  if (missingColumn && options?.filterKey && options.filterKey === missingColumn) {
+    const fallbackQuery = supabase.from(tableName).select('*');
+    if (options?.orderBy) {
+      (fallbackQuery as any).order(options.orderBy.column, { ascending: options.orderBy.ascending ?? true });
+    }
+    const fallback = await fallbackQuery;
+    if (!fallback.error) return fallback.data ?? [];
+  }
+
+  throw error;
+};
+
+const createInsertId = (prefix: string): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+};
+
 function dbToTransaction(row: any): Transaction {
   return {
     id: row.id,
@@ -76,7 +386,7 @@ function dbToTransaction(row: any): Transaction {
     type: row.type,
     category: row.category,
     amount: Number(row.amount) || 0,
-    date: row.date,
+    date: row.tx_date || row.date,
     description: row.description,
     receiptUri: row.receipt_uri || undefined,
     tags: row.tags || [],
@@ -89,7 +399,7 @@ function dbToReceipt(row: any): Receipt {
     propertyId: row.property_id,
     transactionId: row.transaction_id || undefined,
     uri: row.uri,
-    date: row.date,
+    date: row.receipt_date || row.date,
     amount: row.amount ? Number(row.amount) : undefined,
     vendor: row.vendor || undefined,
     category: row.category || undefined,
@@ -146,7 +456,7 @@ function dbToPropertyPhoto(row: any): PropertyPhoto {
     propertyId: row.property_id,
     uri: row.uri,
     caption: row.caption || '',
-    date: row.date,
+    date: row.date ?? row.created_at ?? undefined,
   };
 }
 
@@ -165,50 +475,80 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
 
   const householdId = household?.id;
 
+  const normalizeHouseholdId = useCallback((value: string | null | undefined): string | null => {
+    if (!value) return null;
+    return String(value).trim();
+  }, []);
+
   // Load all data from Supabase when household changes
   const loadAllData = useCallback(async (hhId: string) => {
     setIsSyncing(true);
     try {
+      if (!user?.id) {
+        return;
+      }
+
+      const normalizedHouseholdId = normalizeHouseholdId(hhId);
+      if (!normalizedHouseholdId) {
+        setProperties([]);
+        setTransactions([]);
+        setReceipts([]);
+        setReminders([]);
+        setLeaseFolders([]);
+        setLeaseDocuments([]);
+        setPropertyPhotos([]);
+        return;
+      }
+
       const [propsRes, txRes, recRes, remRes, foldersRes, docsRes, photosRes] = await Promise.all([
-        supabase.from('properties').select('*').eq('household_id', hhId).order('created_at', { ascending: true }),
-        supabase.from('transactions').select('*').eq('household_id', hhId).order('date', { ascending: false }),
-        supabase.from('receipts').select('*').eq('household_id', hhId).order('date', { ascending: false }),
-        supabase.from('reminders').select('*').eq('household_id', hhId).order('due_date', { ascending: true }),
-        supabase.from('lease_folders').select('*').eq('household_id', hhId).order('created_at', { ascending: true }),
-        supabase.from('lease_documents').select('*').eq('household_id', hhId).order('updated_at', { ascending: false }),
-        supabase.from('property_photos').select('*').eq('household_id', hhId).order('date', { ascending: false }),
+        fetchTableRows('properties', { filterKey: 'household_id', filterValue: normalizedHouseholdId, orderBy: { column: 'created_at', ascending: true } }).catch(() => []),
+        fetchTableRows('transactions', { filterKey: 'household_id', filterValue: normalizedHouseholdId, orderBy: { column: 'tx_date', ascending: false } }).catch(() => []),
+        fetchTableRows('receipts', { filterKey: 'household_id', filterValue: normalizedHouseholdId, orderBy: { column: 'receipt_date', ascending: false } }).catch(() => []),
+        fetchTableRows('reminders', { filterKey: 'household_id', filterValue: normalizedHouseholdId, orderBy: { column: 'due_date', ascending: true } }).catch(() => []),
+        fetchTableRows('lease_folders', { filterKey: 'household_id', filterValue: normalizedHouseholdId, orderBy: { column: 'created_at', ascending: true } }).catch(() => []),
+        fetchTableRows('lease_documents', { filterKey: 'household_id', filterValue: normalizedHouseholdId, orderBy: { column: 'updated_at', ascending: false } }).catch(() => []),
+        fetchTableRows('property_photos', { filterKey: 'user_id', filterValue: user.id, orderBy: { column: 'created_at', ascending: false } }).catch(() => []),
       ]);
 
-      if (propsRes.data) setProperties(propsRes.data.map(dbToProperty));
-      if (txRes.data) setTransactions(txRes.data.map(dbToTransaction));
-      if (recRes.data) setReceipts(recRes.data.map(dbToReceipt));
-      if (remRes.data) setReminders(remRes.data.map(dbToReminder));
-      if (foldersRes.data) setLeaseFolders(foldersRes.data.map(dbToLeaseFolder));
-      if (docsRes.data) setLeaseDocuments(docsRes.data.map(dbToLeaseDocument));
-      if (photosRes.data) setPropertyPhotos(photosRes.data.map(dbToPropertyPhoto));
+      setProperties(propsRes.map(dbToProperty));
+      setTransactions(txRes.map(dbToTransaction));
+      setReceipts(recRes.map(dbToReceipt));
+      setReminders(remRes.map(dbToReminder));
+      setLeaseFolders(foldersRes.map(dbToLeaseFolder));
+      setLeaseDocuments(docsRes.map(dbToLeaseDocument));
+      const householdPropertyIds = new Set(propsRes.map((property: any) => property.id));
+      const filteredPhotos = (photosRes ?? []).filter((photo: any) => householdPropertyIds.has(photo.property_id));
+      setPropertyPhotos(filteredPhotos.map(dbToPropertyPhoto));
     } catch (error) {
       console.error('Error loading portfolio data:', error);
     } finally {
       setIsLoading(false);
       setIsSyncing(false);
     }
-  }, []);
+  }, [normalizeHouseholdId, user?.id]);
 
   // Load data when household is available
   useEffect(() => {
-    if (!householdId) {
-      setProperties([]);
-      setTransactions([]);
-      setReceipts([]);
-      setReminders([]);
-      setLeaseFolders([]);
-      setLeaseDocuments([]);
-      setPropertyPhotos([]);
+    const normalizedHouseholdId = normalizeHouseholdId(householdId);
+
+    if (!normalizedHouseholdId) {
+      if (!user) {
+        setProperties([]);
+        setTransactions([]);
+        setReceipts([]);
+        setReminders([]);
+        setLeaseFolders([]);
+        setLeaseDocuments([]);
+        setPropertyPhotos([]);
+      } else {
+        console.log('Household not ready yet; preserving current portfolio state.');
+      }
       setIsLoading(false);
       return;
     }
 
-    loadAllData(householdId);
+    setIsLoading(true);
+    loadAllData(normalizedHouseholdId);
 
     // Set up realtime subscriptions for live sync
     const channel = supabase
@@ -216,7 +556,8 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'properties', filter: `household_id=eq.${householdId}` },
         (payload) => {
           if (payload.eventType === 'INSERT') {
-            setProperties(prev => [...prev, dbToProperty(payload.new)]);
+            const inserted = dbToProperty(payload.new);
+            setProperties(prev => prev.some(p => p.id === inserted.id) ? prev : [...prev, inserted]);
           } else if (payload.eventType === 'UPDATE') {
             setProperties(prev => prev.map(p => p.id === payload.new.id ? dbToProperty(payload.new) : p));
           } else if (payload.eventType === 'DELETE') {
@@ -227,7 +568,8 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions', filter: `household_id=eq.${householdId}` },
         (payload) => {
           if (payload.eventType === 'INSERT') {
-            setTransactions(prev => [dbToTransaction(payload.new), ...prev]);
+            const inserted = dbToTransaction(payload.new);
+            setTransactions(prev => prev.some(t => t.id === inserted.id) ? prev : [inserted, ...prev]);
           } else if (payload.eventType === 'UPDATE') {
             setTransactions(prev => prev.map(t => t.id === payload.new.id ? dbToTransaction(payload.new) : t));
           } else if (payload.eventType === 'DELETE') {
@@ -238,7 +580,8 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'receipts', filter: `household_id=eq.${householdId}` },
         (payload) => {
           if (payload.eventType === 'INSERT') {
-            setReceipts(prev => [dbToReceipt(payload.new), ...prev]);
+            const inserted = dbToReceipt(payload.new);
+            setReceipts(prev => prev.some(r => r.id === inserted.id) ? prev : [inserted, ...prev]);
           } else if (payload.eventType === 'UPDATE') {
             setReceipts(prev => prev.map(r => r.id === payload.new.id ? dbToReceipt(payload.new) : r));
           } else if (payload.eventType === 'DELETE') {
@@ -249,7 +592,8 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reminders', filter: `household_id=eq.${householdId}` },
         (payload) => {
           if (payload.eventType === 'INSERT') {
-            setReminders(prev => [...prev, dbToReminder(payload.new)]);
+            const inserted = dbToReminder(payload.new);
+            setReminders(prev => prev.some(r => r.id === inserted.id) ? prev : [...prev, inserted]);
           } else if (payload.eventType === 'UPDATE') {
             setReminders(prev => prev.map(r => r.id === payload.new.id ? dbToReminder(payload.new) : r));
           } else if (payload.eventType === 'DELETE') {
@@ -260,7 +604,8 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lease_folders', filter: `household_id=eq.${householdId}` },
         (payload) => {
           if (payload.eventType === 'INSERT') {
-            setLeaseFolders(prev => [...prev, dbToLeaseFolder(payload.new)]);
+            const inserted = dbToLeaseFolder(payload.new);
+            setLeaseFolders(prev => prev.some(f => f.id === inserted.id) ? prev : [...prev, inserted]);
           } else if (payload.eventType === 'UPDATE') {
             setLeaseFolders(prev => prev.map(f => f.id === payload.new.id ? dbToLeaseFolder(payload.new) : f));
           } else if (payload.eventType === 'DELETE') {
@@ -271,7 +616,8 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'lease_documents', filter: `household_id=eq.${householdId}` },
         (payload) => {
           if (payload.eventType === 'INSERT') {
-            setLeaseDocuments(prev => [dbToLeaseDocument(payload.new), ...prev]);
+            const inserted = dbToLeaseDocument(payload.new);
+            setLeaseDocuments(prev => prev.some(d => d.id === inserted.id) ? prev : [inserted, ...prev]);
           } else if (payload.eventType === 'UPDATE') {
             setLeaseDocuments(prev => prev.map(d => d.id === payload.new.id ? dbToLeaseDocument(payload.new) : d));
           } else if (payload.eventType === 'DELETE') {
@@ -279,10 +625,11 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
           }
         }
       )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'property_photos', filter: `household_id=eq.${householdId}` },
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'property_photos' },
         (payload) => {
           if (payload.eventType === 'INSERT') {
-            setPropertyPhotos(prev => [dbToPropertyPhoto(payload.new), ...prev]);
+            const inserted = dbToPropertyPhoto(payload.new);
+            setPropertyPhotos(prev => prev.some(p => p.id === inserted.id) ? prev : [inserted, ...prev]);
           } else if (payload.eventType === 'UPDATE') {
             setPropertyPhotos(prev => prev.map(p => p.id === payload.new.id ? dbToPropertyPhoto(payload.new) : p));
           } else if (payload.eventType === 'DELETE') {
@@ -341,8 +688,11 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       const propertyIdMap: Record<string, string> = {};
 
       for (const prop of legacyProps) {
+        const propertyInsertId = prop.id && prop.id.trim() ? prop.id : createInsertId('property');
         const { data, error } = await supabase.from('properties').insert({
+          id: propertyInsertId,
           household_id: hhId,
+          user_id: user.id,
           name: prop.name,
           address: prop.address,
           type: prop.type,
@@ -381,7 +731,9 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       for (const tx of legacyTx) {
         const newPropId = propertyIdMap[tx.propertyId];
         if (!newPropId) continue;
-        await supabase.from('transactions').insert({
+        await supabase.from('transactions').insert(sanitizeTablePayload('transactions', {
+          id: createInsertId('tx'),
+          user_id: user.id,
           household_id: hhId,
           property_id: newPropId,
           type: tx.type,
@@ -391,14 +743,16 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
           description: tx.description,
           receipt_uri: tx.receiptUri,
           tags: tx.tags,
-        });
+        }));
       }
 
       // Migrate receipts
       for (const rec of legacyRecs) {
         const newPropId = propertyIdMap[rec.propertyId];
         if (!newPropId) continue;
-        await supabase.from('receipts').insert({
+        await supabase.from('receipts').insert(sanitizeTablePayload('receipts', {
+          id: createInsertId('receipt'),
+          user_id: user.id,
           household_id: hhId,
           property_id: newPropId,
           uri: rec.uri,
@@ -408,14 +762,16 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
           category: rec.category,
           tags: rec.tags,
           notes: rec.notes,
-        });
+        }));
       }
 
       // Migrate reminders
       for (const rem of legacyRems) {
         const newPropId = propertyIdMap[rem.propertyId];
         if (!newPropId) continue;
-        await supabase.from('reminders').insert({
+        await supabase.from('reminders').insert(sanitizeTablePayload('reminders', {
+          id: createInsertId('reminder'),
+          user_id: user.id,
           household_id: hhId,
           property_id: newPropId,
           type: rem.type,
@@ -425,7 +781,7 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
           completed: rem.completed,
           recipient_phone: rem.recipientPhone,
           recipient_email: rem.recipientEmail,
-        });
+        }));
       }
 
       // Migrate lease folders
@@ -433,12 +789,14 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       for (const folder of legacyFolders) {
         const newPropId = propertyIdMap[folder.propertyId];
         if (!newPropId) continue;
-        const { data, error } = await supabase.from('lease_folders').insert({
+        const { data, error } = await supabase.from('lease_folders').insert(sanitizeTablePayload('lease_folders', {
+          id: createInsertId('folder'),
+          user_id: user.id,
           household_id: hhId,
           property_id: newPropId,
           name: folder.name,
           color: folder.color,
-        }).select().single();
+        })).select().single();
         if (!error && data) {
           folderIdMap[folder.id] = data.id;
         }
@@ -449,7 +807,9 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
         const newPropId = propertyIdMap[doc.propertyId];
         if (!newPropId) continue;
         const newFolderId = doc.folderId ? folderIdMap[doc.folderId] : null;
-        await supabase.from('lease_documents').insert({
+        await supabase.from('lease_documents').insert(sanitizeTablePayload('lease_documents', {
+          id: createInsertId('doc'),
+          user_id: user.id,
           household_id: hhId,
           property_id: newPropId,
           folder_id: newFolderId,
@@ -461,7 +821,7 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
           tenant_name: doc.tenantName,
           date_of_document: doc.dateOfDocument,
           notes: doc.notes,
-        });
+        }));
       }
 
       // Migrate property photos
@@ -469,11 +829,11 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
         const newPropId = propertyIdMap[photo.propertyId];
         if (!newPropId) continue;
         await supabase.from('property_photos').insert({
-          household_id: hhId,
+          id: createInsertId('photo'),
+          user_id: user.id,
           property_id: newPropId,
           uri: photo.uri,
           caption: photo.caption,
-          date: photo.date,
         });
       }
 
@@ -489,10 +849,24 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
   }, [loadAllData]);
 
   // Property CRUD operations
-  const addProperty = useCallback(async (property: Property) => {
-    if (!householdId) return;
-    const { error } = await supabase.from('properties').insert({
+  const addProperty = useCallback(async (property: Property): Promise<Property> => {
+    if (!householdId) {
+      throw new Error('No household selected. Please create or join a household first.');
+    }
+
+    if (!user?.id) {
+      throw new Error('No authenticated user found. Please sign in again and retry.');
+    }
+
+    const propertyInsertId = property.id && property.id.trim() ? property.id : createInsertId('property');
+    const optimisticId = `tmp_property_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticProperty: Property = { ...property, id: optimisticId };
+    setProperties(prev => [...prev, optimisticProperty]);
+
+    const fullPayload = {
+      id: propertyInsertId,
       household_id: householdId,
+      user_id: user.id,
       name: property.name,
       address: property.address,
       type: property.type,
@@ -520,14 +894,92 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       appliance_info: property.applianceInfo,
       notes: property.notes,
       image_uri: property.imageUri,
-    });
-    if (error) {
-      console.error('Error adding property:', error);
-      Alert.alert('Error', 'Failed to save property. Please try again.');
+    };
+
+    const requiredValues: Record<string, any> = {
+      household_id: householdId,
+      user_id: user.id,
+      name: property.name,
+      address: property.address,
+      type: property.type,
+      purchase_price: property.purchasePrice,
+      monthly_rent: property.monthlyRent,
+    };
+
+    // Adaptive retry: keep required fields, only remove columns explicitly
+    // reported as missing by the backend schema.
+    const queue: Record<string, any>[] = [compactPayload(fullPayload)];
+    const seenPayloadSignatures = new Set<string>();
+    const attemptDiagnostics: string[] = [];
+    const maxAttempts = 8;
+    let data: any = null;
+    let lastError: any = null;
+
+    for (let i = 0; i < maxAttempts && queue.length > 0; i += 1) {
+      const payload = queue.shift()!;
+      const signature = JSON.stringify(Object.keys(payload).sort());
+      if (seenPayloadSignatures.has(signature)) {
+        continue;
+      }
+      seenPayloadSignatures.add(signature);
+
+      const result = await supabase.from('properties').insert(payload).select('*').single();
+      if (!result.error && result.data) {
+        data = result.data;
+        lastError = null;
+        break;
+      }
+
+      lastError = result.error;
+      const keyList = Object.keys(payload).sort().join(', ');
+      attemptDiagnostics.push(`Attempt ${attemptDiagnostics.length + 1} [${keyList}] -> ${formatSupabaseError(result.error)}`);
+
+      const missingColumn = extractMissingColumn(result.error);
+      if (
+        missingColumn &&
+        !NON_DROPPABLE_PROPERTY_COLUMNS.has(missingColumn) &&
+        Object.prototype.hasOwnProperty.call(payload, missingColumn)
+      ) {
+        const nextPayload = { ...payload };
+        delete nextPayload[missingColumn];
+
+        // Re-assert required values when the column still exists and is needed.
+        if (missingColumn !== 'household_id' && !Object.prototype.hasOwnProperty.call(nextPayload, 'household_id')) {
+          nextPayload.household_id = requiredValues.household_id;
+        }
+        if (missingColumn !== 'user_id' && !Object.prototype.hasOwnProperty.call(nextPayload, 'user_id')) {
+          nextPayload.user_id = requiredValues.user_id;
+        }
+        if (!Object.prototype.hasOwnProperty.call(nextPayload, 'name')) nextPayload.name = requiredValues.name;
+        if (!Object.prototype.hasOwnProperty.call(nextPayload, 'address')) nextPayload.address = requiredValues.address;
+        if (!Object.prototype.hasOwnProperty.call(nextPayload, 'type')) nextPayload.type = requiredValues.type;
+        if (!Object.prototype.hasOwnProperty.call(nextPayload, 'purchase_price')) nextPayload.purchase_price = requiredValues.purchase_price;
+        if (!Object.prototype.hasOwnProperty.call(nextPayload, 'monthly_rent')) nextPayload.monthly_rent = requiredValues.monthly_rent;
+
+        queue.push(compactPayload(nextPayload));
+      }
     }
-  }, [householdId]);
+
+    if (lastError || !data) {
+      setProperties(prev => prev.filter(p => p.id !== optimisticId));
+      console.error('Error adding property:', lastError);
+      const details = attemptDiagnostics.length > 0 ? ` Attempts: ${attemptDiagnostics.join(' | ')}` : '';
+      throw new Error(`Failed to save property: ${formatSupabaseError(lastError)}${details}`);
+    }
+
+    const insertedProperty = dbToProperty(data);
+    setProperties(prev => prev.map(p => (p.id === optimisticId ? insertedProperty : p)));
+    return insertedProperty;
+  }, [householdId, user?.id]);
 
   const updateProperty = useCallback(async (id: string, updates: Partial<Property>) => {
+    const previousProperty = properties.find(p => p.id === id);
+    if (!previousProperty) {
+      throw new Error('Property not found.');
+    }
+
+    setProperties(prev => prev.map(p => (p.id === id ? { ...p, ...updates } : p)));
+
     const updateData: Record<string, any> = { updated_at: new Date().toISOString() };
     if (updates.name !== undefined) updateData.name = updates.name;
     if (updates.address !== undefined) updateData.address = updates.address;
@@ -559,45 +1011,99 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
 
     const { error } = await supabase.from('properties').update(updateData).eq('id', id);
     if (error) {
+      setProperties(prev => prev.map(p => (p.id === id ? previousProperty : p)));
       console.error('Error updating property:', error);
-      Alert.alert('Error', 'Failed to update property. Please try again.');
+      throw error;
     }
-  }, []);
+  }, [properties]);
 
   const deleteProperty = useCallback(async (id: string) => {
+    const propertiesSnapshot = properties;
+    const transactionsSnapshot = transactions;
+    const receiptsSnapshot = receipts;
+    const remindersSnapshot = reminders;
+    const leaseFoldersSnapshot = leaseFolders;
+    const leaseDocumentsSnapshot = leaseDocuments;
+    const propertyPhotosSnapshot = propertyPhotos;
+
+    setProperties(prev => prev.filter(p => p.id !== id));
+    setTransactions(prev => prev.filter(t => t.propertyId !== id));
+    setReceipts(prev => prev.filter(r => r.propertyId !== id));
+    setReminders(prev => prev.filter(r => r.propertyId !== id));
+    setLeaseFolders(prev => prev.filter(f => f.propertyId !== id));
+    setLeaseDocuments(prev => prev.filter(d => d.propertyId !== id));
+    setPropertyPhotos(prev => prev.filter(photo => photo.propertyId !== id));
+
     const { error } = await supabase.from('properties').delete().eq('id', id);
     if (error) {
+      setProperties(propertiesSnapshot);
+      setTransactions(transactionsSnapshot);
+      setReceipts(receiptsSnapshot);
+      setReminders(remindersSnapshot);
+      setLeaseFolders(leaseFoldersSnapshot);
+      setLeaseDocuments(leaseDocumentsSnapshot);
+      setPropertyPhotos(propertyPhotosSnapshot);
       console.error('Error deleting property:', error);
-      Alert.alert('Error', 'Failed to delete property. Please try again.');
+      throw error;
     }
-  }, []);
+  }, [properties, transactions, receipts, reminders, leaseFolders, leaseDocuments, propertyPhotos]);
 
   // Transaction CRUD operations
-  const addTransaction = useCallback(async (transaction: Transaction) => {
-    if (!householdId) return;
-    const { error } = await supabase.from('transactions').insert({
+  const addTransaction = useCallback(async (transaction: Transaction): Promise<Transaction> => {
+    if (!householdId) {
+      throw new Error('No household selected. Please create or join a household first.');
+    }
+
+    const optimisticId = `tmp_tx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticTransaction: Transaction = { ...transaction, id: optimisticId };
+    setTransactions(prev => [optimisticTransaction, ...prev]);
+
+    const { data, error } = await retryMissingColumnOperation<Transaction>('transactions', {
+      id: createInsertId('tx'),
+      user_id: user.id,
       household_id: householdId,
       property_id: transaction.propertyId,
       type: transaction.type,
       category: transaction.category,
       amount: transaction.amount,
+      tx_date: transaction.date,
       date: transaction.date,
       description: transaction.description,
       receipt_uri: transaction.receiptUri,
       tags: transaction.tags,
-    });
+    }, 'insert');
     if (error) {
+      setTransactions(prev => prev.filter(t => t.id !== optimisticId));
       console.error('Error adding transaction:', error);
-      Alert.alert('Error', 'Failed to save transaction. Please try again.');
+      throw error;
     }
+
+    if (!data) {
+      setTransactions(prev => prev.filter(t => t.id !== optimisticId));
+      throw new Error('Transaction insert succeeded but no row was returned.');
+    }
+
+    const insertedTransaction = dbToTransaction(data);
+    setTransactions(prev => prev.map(t => (t.id === optimisticId ? insertedTransaction : t)));
+    return insertedTransaction;
   }, [householdId]);
 
   const updateTransaction = useCallback(async (id: string, updates: Partial<Transaction>) => {
+    const previousTransaction = transactions.find(t => t.id === id);
+    if (!previousTransaction) {
+      throw new Error('Transaction not found.');
+    }
+
+    setTransactions(prev => prev.map(t => (t.id === id ? { ...t, ...updates } : t)));
+
     const updateData: Record<string, any> = { updated_at: new Date().toISOString() };
     if (updates.type !== undefined) updateData.type = updates.type;
     if (updates.category !== undefined) updateData.category = updates.category;
     if (updates.amount !== undefined) updateData.amount = updates.amount;
-    if (updates.date !== undefined) updateData.date = updates.date;
+    if (updates.date !== undefined) {
+      updateData.tx_date = updates.date;
+      updateData.date = updates.date;
+    }
     if (updates.description !== undefined) updateData.description = updates.description;
     if (updates.receiptUri !== undefined) updateData.receipt_uri = updates.receiptUri;
     if (updates.tags !== undefined) updateData.tags = updates.tags;
@@ -605,62 +1111,115 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
 
     const { error } = await supabase.from('transactions').update(updateData).eq('id', id);
     if (error) {
+      setTransactions(prev => prev.map(t => (t.id === id ? previousTransaction : t)));
       console.error('Error updating transaction:', error);
-      Alert.alert('Error', 'Failed to update transaction. Please try again.');
+      throw error;
     }
-  }, []);
+  }, [transactions]);
 
   const deleteTransaction = useCallback(async (id: string) => {
+    const snapshot = transactions;
+    setTransactions(prev => prev.filter(t => t.id !== id));
+
     const { error } = await supabase.from('transactions').delete().eq('id', id);
     if (error) {
+      setTransactions(snapshot);
       console.error('Error deleting transaction:', error);
-      Alert.alert('Error', 'Failed to delete transaction. Please try again.');
+      throw error;
     }
-  }, []);
+  }, [transactions]);
 
   // Receipt CRUD operations
-  const addReceipt = useCallback(async (receipt: Receipt) => {
-    if (!householdId) return;
-    try {
-      const { data: recData, error: recErr } = await supabase.from('receipts').insert({
+  const addReceipt = useCallback(async (receipt: Receipt): Promise<Receipt> => {
+    if (!householdId) {
+      throw new Error('No household selected. Please create or join a household first.');
+    }
+
+    const optimisticId = `tmp_receipt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticReceipt: Receipt = { ...receipt, id: optimisticId };
+    setReceipts(prev => prev.some(r => r.id === optimisticId) ? prev : [optimisticReceipt, ...prev]);
+
+    let uploadedUri = receipt.uri;
+    if (receipt.uri) {
+      try {
+        uploadedUri = await uploadImageToStorage(
+          receipt.uri,
+          [RECEIPT_MEDIA_BUCKET],
+          householdId,
+          'receipt'
+        );
+      } catch (uploadError) {
+        setReceipts(prev => prev.filter(r => r.id !== optimisticId));
+        console.error('Receipt image upload failed:', uploadError);
+        throw new Error('Failed to upload receipt image to cloud storage. Please try again.');
+      }
+    }
+
+    const { data: recData, error: recErr } = await retryMissingColumnOperation<Receipt>('receipts', {
+      id: createInsertId('receipt'),
+      user_id: user.id,
+      household_id: householdId,
+      property_id: receipt.propertyId,
+      uri: uploadedUri,
+      receipt_date: receipt.date,
+      date: receipt.date,
+      amount: receipt.amount,
+      vendor: receipt.vendor,
+      category: receipt.category,
+      tags: receipt.tags,
+      notes: receipt.notes,
+    }, 'insert');
+
+    if (recErr) {
+      setReceipts(prev => prev.filter(r => r.id !== optimisticId));
+      console.error('Error adding receipt:', recErr);
+      throw recErr;
+    }
+
+    if (!recData) {
+      setReceipts(prev => prev.filter(r => r.id !== optimisticId));
+      throw new Error('Receipt insert succeeded but no row was returned.');
+    }
+
+    const insertedReceipt = dbToReceipt(recData);
+    setReceipts(prev => prev.map(r => (r.id === optimisticId ? insertedReceipt : r)));
+
+    // Best-effort transaction creation from receipt metadata.
+    if (receipt.amount && receipt.category) {
+      const { error: txErr } = await supabase.from('transactions').insert(sanitizeTablePayload('transactions', {
+        id: createInsertId('tx'),
+        user_id: user.id,
         household_id: householdId,
         property_id: receipt.propertyId,
-        uri: receipt.uri,
-        date: receipt.date,
-        amount: receipt.amount,
-        vendor: receipt.vendor,
+        type: 'expense',
         category: receipt.category,
-        tags: receipt.tags,
-        notes: receipt.notes,
-      }).select().single();
-
-      if (recErr) throw recErr;
-
-      // Automatically create a transaction from the receipt if it has amount and category
-      if (receipt.amount && receipt.category && recData) {
-        const { error: txErr } = await supabase.from('transactions').insert({
-          household_id: householdId,
-          property_id: receipt.propertyId,
-          type: 'expense',
-          category: receipt.category,
-          amount: receipt.amount,
-          date: receipt.date,
-          description: receipt.vendor ? `Receipt from ${receipt.vendor}` : 'Receipt expense',
-          receipt_uri: receipt.uri,
-          tags: receipt.tags || [],
-        });
-        if (txErr) console.error('Error creating transaction from receipt:', txErr);
-      }
-    } catch (error) {
-      console.error('Error adding receipt:', error);
-      Alert.alert('Error', 'Failed to save receipt. Please try again.');
+        amount: receipt.amount,
+        tx_date: receipt.date,
+        date: receipt.date,
+        description: receipt.vendor ? `Receipt from ${receipt.vendor}` : 'Receipt expense',
+        receipt_uri: uploadedUri,
+        tags: receipt.tags || [],
+      }));
+      if (txErr) console.error('Error creating transaction from receipt:', txErr);
     }
+
+    return insertedReceipt;
   }, [householdId]);
 
   const updateReceipt = useCallback(async (id: string, updates: Partial<Receipt>) => {
+    const previousReceipt = receipts.find(r => r.id === id);
+    if (!previousReceipt) {
+      throw new Error('Receipt not found.');
+    }
+
+    setReceipts(prev => prev.map(r => (r.id === id ? { ...r, ...updates } : r)));
+
     const updateData: Record<string, any> = { updated_at: new Date().toISOString() };
     if (updates.uri !== undefined) updateData.uri = updates.uri;
-    if (updates.date !== undefined) updateData.date = updates.date;
+    if (updates.date !== undefined) {
+      updateData.receipt_date = updates.date;
+      updateData.date = updates.date;
+    }
     if (updates.amount !== undefined) updateData.amount = updates.amount;
     if (updates.vendor !== undefined) updateData.vendor = updates.vendor;
     if (updates.category !== undefined) updateData.category = updates.category;
@@ -670,44 +1229,86 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
 
     const { error } = await supabase.from('receipts').update(updateData).eq('id', id);
     if (error) {
+      setReceipts(prev => prev.map(r => (r.id === id ? previousReceipt : r)));
       console.error('Error updating receipt:', error);
-      Alert.alert('Error', 'Failed to update receipt. Please try again.');
+      throw error;
     }
-  }, []);
+  }, [receipts]);
 
   const deleteReceipt = useCallback(async (id: string) => {
+    const snapshot = receipts;
+    setReceipts(prev => prev.filter(r => r.id !== id));
+
     const { error } = await supabase.from('receipts').delete().eq('id', id);
     if (error) {
+      setReceipts(snapshot);
       console.error('Error deleting receipt:', error);
-      Alert.alert('Error', 'Failed to delete receipt. Please try again.');
+      throw error;
     }
-  }, []);
+  }, [receipts]);
 
   // Reminder CRUD operations
-  const addReminder = useCallback(async (reminder: Reminder) => {
-    if (!householdId) return;
-    const { error } = await supabase.from('reminders').insert({
+  const addReminder = useCallback(async (reminder: Reminder): Promise<Reminder> => {
+    if (!householdId) {
+      throw new Error('No household selected. Please create or join a household first.');
+    }
+
+    const optimisticId = `tmp_reminder_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticReminder: Reminder = { ...reminder, id: optimisticId };
+    setReminders(prev => prev.some(r => r.id === optimisticId) ? prev : [...prev, optimisticReminder]);
+
+    const normalizedDueDate = normalizeReminderDueDate(reminder.dueDate);
+
+    const { data, error } = await retryMissingColumnOperation<Reminder>('reminders', {
+      id: createInsertId('reminder'),
+      user_id: user.id,
       household_id: householdId,
       property_id: reminder.propertyId,
       type: reminder.type,
       title: reminder.title,
-      due_date: reminder.dueDate,
+      due_date: normalizedDueDate,
       notes: reminder.notes,
       completed: reminder.completed,
       recipient_phone: reminder.recipientPhone,
       recipient_email: reminder.recipientEmail,
-    });
+    }, 'insert');
     if (error) {
+      setReminders(prev => prev.filter(r => r.id !== optimisticId));
       console.error('Error adding reminder:', error);
-      Alert.alert('Error', 'Failed to save reminder. Please try again.');
+      throw error;
     }
+
+    if (!data) {
+      setReminders(prev => prev.filter(r => r.id !== optimisticId));
+      throw new Error('Reminder insert succeeded but no row was returned.');
+    }
+
+    const insertedReminder = dbToReminder(data);
+    setReminders(prev => prev.map(r => (r.id === optimisticId ? insertedReminder : r)));
+
+    try {
+      await scheduleLocalReminderNotification(insertedReminder);
+    } catch (notificationError) {
+      console.warn('Failed to schedule local reminder notification:', notificationError);
+    }
+
+    return insertedReminder;
   }, [householdId]);
 
   const updateReminder = useCallback(async (id: string, updates: Partial<Reminder>) => {
+    const previousReminder = reminders.find(r => r.id === id);
+    if (!previousReminder) {
+      throw new Error('Reminder not found.');
+    }
+
+    const nextReminder: Reminder = { ...previousReminder, ...updates };
+
+    setReminders(prev => prev.map(r => (r.id === id ? { ...r, ...updates } : r)));
+
     const updateData: Record<string, any> = { updated_at: new Date().toISOString() };
     if (updates.type !== undefined) updateData.type = updates.type;
     if (updates.title !== undefined) updateData.title = updates.title;
-    if (updates.dueDate !== undefined) updateData.due_date = updates.dueDate;
+    if (updates.dueDate !== undefined) updateData.due_date = normalizeReminderDueDate(updates.dueDate);
     if (updates.notes !== undefined) updateData.notes = updates.notes;
     if (updates.completed !== undefined) updateData.completed = updates.completed;
     if (updates.recipientPhone !== undefined) updateData.recipient_phone = updates.recipientPhone;
@@ -716,69 +1317,196 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
 
     const { error } = await supabase.from('reminders').update(updateData).eq('id', id);
     if (error) {
+      setReminders(prev => prev.map(r => (r.id === id ? previousReminder : r)));
       console.error('Error updating reminder:', error);
-      Alert.alert('Error', 'Failed to update reminder. Please try again.');
+      throw error;
     }
-  }, []);
+
+    try {
+      await syncLocalReminderNotification(nextReminder);
+    } catch (notificationError) {
+      console.warn('Failed to sync local reminder notification:', notificationError);
+    }
+  }, [reminders]);
 
   const deleteReminder = useCallback(async (id: string) => {
+    const snapshot = reminders;
+    setReminders(prev => prev.filter(r => r.id !== id));
+
     const { error } = await supabase.from('reminders').delete().eq('id', id);
     if (error) {
+      setReminders(snapshot);
       console.error('Error deleting reminder:', error);
-      Alert.alert('Error', 'Failed to delete reminder. Please try again.');
+      throw error;
     }
-  }, []);
+
+    try {
+      await cancelLocalReminderNotification(id);
+    } catch (notificationError) {
+      console.warn('Failed to cancel local reminder notification:', notificationError);
+    }
+  }, [reminders]);
 
   // Property Photo CRUD operations
-  const addPropertyPhoto = useCallback(async (photo: PropertyPhoto) => {
-    if (!householdId) return;
-    const { error } = await supabase.from('property_photos').insert({
-      household_id: householdId,
-      property_id: photo.propertyId,
-      uri: photo.uri,
-      caption: photo.caption,
-      date: photo.date,
-    });
-    if (error) {
-      console.error('Error adding property photo:', error);
-      Alert.alert('Error', 'Failed to save photo. Please try again.');
+  const addPropertyPhoto = useCallback(async (photo: PropertyPhoto): Promise<PropertyPhoto> => {
+    if (!householdId) {
+      throw new Error('No household selected. Please create or join a household first.');
     }
+
+    if (!user?.id) {
+      throw new Error('No authenticated user found. Please sign in again and retry.');
+    }
+
+    const optimisticId = `tmp_photo_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticPhoto: PropertyPhoto = { ...photo, id: optimisticId };
+    setPropertyPhotos(prev => prev.some(p => p.id === optimisticId) ? prev : [optimisticPhoto, ...prev]);
+
+    let uploadedUri = photo.uri;
+    try {
+      uploadedUri = await uploadImageToStorage(
+        photo.uri,
+        [PROPERTY_MEDIA_BUCKET],
+        householdId,
+        'property_photo'
+      );
+    } catch (uploadError) {
+      setPropertyPhotos(prev => prev.filter(p => p.id !== optimisticId));
+      console.error('Property photo upload failed:', uploadError);
+      throw new Error('Failed to upload photo to cloud storage. Please try again.');
+    }
+
+    const photoInsertPayload = sanitizeTablePayload('property_photos', {
+      id: createInsertId('photo'),
+      user_id: user.id,
+      property_id: photo.propertyId,
+      uri: uploadedUri,
+      caption: photo.caption,
+    });
+
+    const { data, error } = await supabase.from('property_photos').insert(photoInsertPayload).select('*').single();
+    if (error) {
+      setPropertyPhotos(prev => prev.filter(p => p.id !== optimisticId));
+      console.error('Error adding property photo:', error);
+      throw error;
+    }
+
+    if (!data) {
+      setPropertyPhotos(prev => prev.filter(p => p.id !== optimisticId));
+      throw new Error('Photo insert succeeded but no row was returned.');
+    }
+
+    const insertedPhoto = dbToPropertyPhoto(data);
+    setPropertyPhotos(prev => prev.map(p => (p.id === optimisticId ? insertedPhoto : p)));
+
+    return insertedPhoto;
   }, [householdId]);
 
   const deletePropertyPhoto = useCallback(async (id: string) => {
+    const snapshot = propertyPhotos;
+    setPropertyPhotos(prev => prev.filter(photo => photo.id !== id));
+
     const { error } = await supabase.from('property_photos').delete().eq('id', id);
     if (error) {
+      setPropertyPhotos(snapshot);
       console.error('Error deleting property photo:', error);
-      Alert.alert('Error', 'Failed to delete photo. Please try again.');
+      throw error;
     }
-  }, []);
+  }, [propertyPhotos]);
+
+  const updatePropertyPhoto = useCallback(async (id: string, updates: Partial<PropertyPhoto>) => {
+    const previousPhoto = propertyPhotos.find(photo => photo.id === id);
+    if (!previousPhoto) return;
+
+    setPropertyPhotos(prev => prev.map(photo => (photo.id === id ? { ...photo, ...updates } : photo)));
+
+    const updateData: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (updates.caption !== undefined) updateData.caption = updates.caption;
+    if (updates.uri !== undefined) updateData.uri = updates.uri;
+    if (updates.propertyId !== undefined) updateData.property_id = updates.propertyId;
+
+    const safeUpdateData = sanitizeTablePayload('property_photos', updateData);
+
+    const { data, error } = await supabase
+      .from('property_photos')
+      .update(safeUpdateData)
+      .eq('id', id)
+      .select('*')
+      .single();
+
+    if (error) {
+      setPropertyPhotos(prev => prev.map(photo => (photo.id === id ? previousPhoto : photo)));
+      console.error('Error updating property photo:', error);
+      throw error;
+    }
+
+    if (!data) {
+      throw new Error('Photo update succeeded but no row was returned.');
+    }
+
+    const updatedPhoto = dbToPropertyPhoto(data);
+    setPropertyPhotos(prev => prev.map(photo => (photo.id === id ? updatedPhoto : photo)));
+  }, [propertyPhotos]);
 
   // Lease Folder CRUD operations
-  const addLeaseFolder = useCallback(async (folder: LeaseFolder) => {
-    if (!householdId) return;
-    const { error } = await supabase.from('lease_folders').insert({
+  const addLeaseFolder = useCallback(async (folder: LeaseFolder): Promise<LeaseFolder> => {
+    if (!householdId) {
+      throw new Error('No household selected. Please create or join a household first.');
+    }
+
+    if (!user?.id) {
+      throw new Error('No authenticated user found. Please sign in again and retry.');
+    }
+
+    const optimisticId = `tmp_folder_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticFolder: LeaseFolder = {
+      ...folder,
+      id: optimisticId,
+      createdAt: folder.createdAt || new Date().toISOString(),
+    };
+    setLeaseFolders(prev => prev.some(f => f.id === optimisticId) ? prev : [...prev, optimisticFolder]);
+
+    const { data, error } = await retryMissingColumnOperation<LeaseFolder>('lease_folders', {
+      user_id: user.id,
       household_id: householdId,
       property_id: folder.propertyId,
       name: folder.name,
       color: folder.color,
-    });
+    }, 'insert');
     if (error) {
+      setLeaseFolders(prev => prev.filter(f => f.id !== optimisticId));
       console.error('Error adding lease folder:', error);
-      Alert.alert('Error', 'Failed to save folder. Please try again.');
+      throw error;
     }
-  }, [householdId]);
+
+    if (!data) {
+      setLeaseFolders(prev => prev.filter(f => f.id !== optimisticId));
+      throw new Error('Lease folder insert succeeded but no row was returned.');
+    }
+
+    const insertedFolder = dbToLeaseFolder(data);
+    setLeaseFolders(prev => prev.map(f => (f.id === optimisticId ? insertedFolder : f)));
+    return insertedFolder;
+  }, [householdId, user?.id]);
 
   const updateLeaseFolder = useCallback(async (id: string, updates: Partial<LeaseFolder>) => {
+    const previousFolder = leaseFolders.find(folder => folder.id === id);
+    if (!previousFolder) {
+      throw new Error('Folder not found.');
+    }
+
+    setLeaseFolders(prev => prev.map(folder => (folder.id === id ? { ...folder, ...updates } : folder)));
+
     const updateData: Record<string, any> = { updated_at: new Date().toISOString() };
     if (updates.name !== undefined) updateData.name = updates.name;
     if (updates.color !== undefined) updateData.color = updates.color;
 
     const { error } = await supabase.from('lease_folders').update(updateData).eq('id', id);
     if (error) {
+      setLeaseFolders(prev => prev.map(folder => (folder.id === id ? previousFolder : folder)));
       console.error('Error updating lease folder:', error);
-      Alert.alert('Error', 'Failed to update folder. Please try again.');
+      throw error;
     }
-  }, []);
+  }, [leaseFolders]);
 
   const reorderLeaseFolders = useCallback(async (reorderedFolders: LeaseFolder[]) => {
     // Supabase doesn't have built-in reordering; we'd need an order column.
@@ -787,36 +1515,82 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
   }, []);
 
   const deleteLeaseFolder = useCallback(async (id: string) => {
+    const leaseFoldersSnapshot = leaseFolders;
+    const leaseDocumentsSnapshot = leaseDocuments;
+
+    setLeaseFolders(prev => prev.filter(folder => folder.id !== id));
+    setLeaseDocuments(prev => prev.filter(document => document.folderId !== id));
+
     const { error } = await supabase.from('lease_folders').delete().eq('id', id);
     if (error) {
+      setLeaseFolders(leaseFoldersSnapshot);
+      setLeaseDocuments(leaseDocumentsSnapshot);
       console.error('Error deleting lease folder:', error);
-      Alert.alert('Error', 'Failed to delete folder. Please try again.');
+      throw error;
     }
-  }, []);
+  }, [leaseFolders, leaseDocuments]);
 
   // Lease Document CRUD operations
-  const addLeaseDocument = useCallback(async (document: LeaseDocument) => {
-    if (!householdId) return;
-    const { error } = await supabase.from('lease_documents').insert({
+  const addLeaseDocument = useCallback(async (document: LeaseDocument): Promise<LeaseDocument> => {
+    if (!householdId) {
+      throw new Error('No household selected. Please create or join a household first.');
+    }
+
+    if (!user?.id) {
+      throw new Error('No authenticated user found. Please sign in again and retry.');
+    }
+
+    const optimisticId = `tmp_doc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const nowIso = new Date().toISOString();
+    const optimisticDocument: LeaseDocument = {
+      ...document,
+      id: optimisticId,
+      createdAt: document.createdAt || nowIso,
+      updatedAt: document.updatedAt || nowIso,
+    };
+    setLeaseDocuments(prev => prev.some(d => d.id === optimisticId) ? prev : [optimisticDocument, ...prev]);
+
+    const savedOriginalImageUri = document.originalImageUri;
+
+    const { data, error } = await retryMissingColumnOperation<LeaseDocument>('lease_documents', {
+      user_id: user.id,
       household_id: householdId,
       property_id: document.propertyId,
       folder_id: document.folderId || null,
       type: document.type,
       title: document.title,
       content: document.content,
-      original_image_uri: document.originalImageUri,
+      original_image_uri: savedOriginalImageUri,
       tags: document.tags,
       tenant_name: document.tenantName,
       date_of_document: document.dateOfDocument,
       notes: document.notes,
-    });
+    }, 'insert');
     if (error) {
+      setLeaseDocuments(prev => prev.filter(d => d.id !== optimisticId));
       console.error('Error adding lease document:', error);
-      Alert.alert('Error', 'Failed to save document. Please try again.');
+      throw error;
     }
-  }, [householdId]);
+
+    if (!data) {
+      setLeaseDocuments(prev => prev.filter(d => d.id !== optimisticId));
+      throw new Error('Lease document insert succeeded but no row was returned.');
+    }
+
+    const insertedDocument = dbToLeaseDocument(data);
+    setLeaseDocuments(prev => prev.map(d => (d.id === optimisticId ? insertedDocument : d)));
+
+    return insertedDocument;
+  }, [householdId, user?.id]);
 
   const updateLeaseDocument = useCallback(async (id: string, updates: Partial<LeaseDocument>) => {
+    const previousDocument = leaseDocuments.find(document => document.id === id);
+    if (!previousDocument) {
+      throw new Error('Document not found.');
+    }
+
+    setLeaseDocuments(prev => prev.map(document => (document.id === id ? { ...document, ...updates } : document)));
+
     const updateData: Record<string, any> = { updated_at: new Date().toISOString() };
     if (updates.type !== undefined) updateData.type = updates.type;
     if (updates.title !== undefined) updateData.title = updates.title;
@@ -831,18 +1605,23 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
 
     const { error } = await supabase.from('lease_documents').update(updateData).eq('id', id);
     if (error) {
+      setLeaseDocuments(prev => prev.map(document => (document.id === id ? previousDocument : document)));
       console.error('Error updating lease document:', error);
-      Alert.alert('Error', 'Failed to update document. Please try again.');
+      throw error;
     }
-  }, []);
+  }, [leaseDocuments]);
 
   const deleteLeaseDocument = useCallback(async (id: string) => {
+    const snapshot = leaseDocuments;
+    setLeaseDocuments(prev => prev.filter(document => document.id !== id));
+
     const { error } = await supabase.from('lease_documents').delete().eq('id', id);
     if (error) {
+      setLeaseDocuments(snapshot);
       console.error('Error deleting lease document:', error);
-      Alert.alert('Error', 'Failed to delete document. Please try again.');
+      throw error;
     }
-  }, []);
+  }, [leaseDocuments]);
 
   // OCR functionality using AI API
   const extractTextFromImage = useCallback(async (imageUri: string): Promise<string> => {
@@ -1064,13 +1843,7 @@ ${document.tags.length > 0 ? `\nTags: ${document.tags.join(', ')}` : ''}
   const saveReceiptWithLocation = useCallback(async (uri: string, _filename: string) => {
     try {
       if (Platform.OS === 'web') return uri;
-      try {
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(uri, { mimeType: 'image/jpeg', dialogTitle: 'Save Receipt Image' });
-        }
-      } catch (shareError) {
-        console.log('Could not share receipt image:', shareError);
-      }
+      // Keep URI unchanged; receipt save should not trigger a share prompt.
       return uri;
     } catch (error) {
       console.error('Error handling receipt:', error);
@@ -1087,7 +1860,7 @@ ${document.tags.length > 0 ? `\nTags: ${document.tags.join(', ')}` : ''}
     addReminder, updateReminder, deleteReminder,
     addLeaseFolder, updateLeaseFolder, deleteLeaseFolder, reorderLeaseFolders,
     addLeaseDocument, updateLeaseDocument, deleteLeaseDocument,
-    addPropertyPhoto, deletePropertyPhoto,
+    addPropertyPhoto, updatePropertyPhoto, deletePropertyPhoto,
     extractTextFromImage, exportLeaseDocument,
     portfolioMetrics, upcomingReminders,
     exportTransactionsToExcel, saveReceiptWithLocation,

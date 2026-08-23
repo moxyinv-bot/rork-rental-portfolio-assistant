@@ -132,7 +132,8 @@ export default function EditTransactionScreen() {
       router.back();
     } catch (error) {
       console.error('Error updating transaction:', error);
-      Alert.alert('Error', 'Failed to update transaction. Please try again.');
+      const message = error instanceof Error ? error.message : 'Failed to update transaction. Please try again.';
+      Alert.alert('Error', message);
     } finally {
       setIsLoading(false);
     }
@@ -155,7 +156,8 @@ export default function EditTransactionScreen() {
               router.back();
             } catch (error) {
               console.error('Error deleting transaction:', error);
-              Alert.alert('Error', 'Failed to delete transaction. Please try again.');
+              const message = error instanceof Error ? error.message : 'Failed to delete transaction. Please try again.';
+              Alert.alert('Error', message);
             } finally {
               setIsLoading(false);
             }

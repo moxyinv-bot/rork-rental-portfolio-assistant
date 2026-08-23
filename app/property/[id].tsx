@@ -4,6 +4,7 @@ import {
   Text,
   View,
   ScrollView,
+  KeyboardAvoidingView,
   TouchableOpacity,
   Image,
   Alert,
@@ -30,12 +31,18 @@ export default function PropertyDetailsScreen() {
   const photos = usePropertyPhotos(id as string);
   
   const [showPhotoModal, setShowPhotoModal] = useState(false);
-  const [selectedPhotoUri, setSelectedPhotoUri] = useState<string | null>(null);
-  const [photoCaption, setPhotoCaption] = useState("");
+  const [selectedPhotoUris, setSelectedPhotoUris] = useState<string[]>([]);
+  const [photoCaptions, setPhotoCaptions] = useState<string[]>([]);
+  const [photoWizardIndex, setPhotoWizardIndex] = useState(0);
+  const [isSavingPhoto, setIsSavingPhoto] = useState(false);
+  const [photoSaveProgress, setPhotoSaveProgress] = useState({ completed: 0, total: 0 });
   const [activeTab, setActiveTab] = useState<"overview" | "transactions" | "documents" | "reminders">("overview");
   const [showGallery, setShowGallery] = useState(false);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [viewerCaption, setViewerCaption] = useState<string>("");
+  const [editingPhoto, setEditingPhoto] = useState<PropertyPhoto | null>(null);
+  const [editingCaption, setEditingCaption] = useState("");
+  const [isUpdatingCaption, setIsUpdatingCaption] = useState(false);
   
   const property = properties.find(p => p.id === id);
 
@@ -56,15 +63,72 @@ export default function PropertyDetailsScreen() {
     }).format(amount);
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return '—';
+
+    const parts = dateString.split('-');
+    let date: Date;
+    if (parts.length === 3 && parts[0].length <= 2) {
+      const month = parseInt(parts[0], 10) - 1;
+      const day = parseInt(parts[1], 10);
+      const yearPart = parseInt(parts[2], 10);
+      const year = parts[2].length === 2 ? yearPart + 2000 : yearPart;
+      date = new Date(year, month, day);
+    } else {
+      date = new Date(dateString);
+    }
+
+    if (Number.isNaN(date.getTime())) {
+      return dateString;
+    }
+
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const day = date.getDate().toString().padStart(2, '0');
     const year = date.getFullYear().toString().slice(-2);
     return `${month}-${day}-${year}`;
   };
 
-  const { addPropertyPhoto, deletePropertyPhoto } = usePortfolio();
+  const formatTransactionDate = (dateString: string) => {
+    const parts = dateString.split('-');
+    let date: Date;
+    if (parts.length === 3 && parts[0].length <= 2) {
+      const month = parseInt(parts[0], 10) - 1;
+      const day = parseInt(parts[1], 10);
+      const yearPart = parseInt(parts[2], 10);
+      const year = parts[2].length === 2 ? yearPart + 2000 : yearPart;
+      date = new Date(year, month, day);
+    } else {
+      date = new Date(dateString);
+    }
+
+    if (Number.isNaN(date.getTime())) {
+      return dateString;
+    }
+
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
+  const { addPropertyPhoto, updatePropertyPhoto, deletePropertyPhoto } = usePortfolio();
+
+  const resetPhotoWizard = () => {
+    setShowPhotoModal(false);
+    setSelectedPhotoUris([]);
+    setPhotoCaptions([]);
+    setPhotoWizardIndex(0);
+    setPhotoSaveProgress({ completed: 0, total: 0 });
+  };
+
+  const updateCurrentPhotoCaption = (text: string) => {
+    setPhotoCaptions(prev => {
+      const next = [...prev];
+      next[photoWizardIndex] = text;
+      return next;
+    });
+  };
 
   const pickPhoto = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -74,11 +138,16 @@ export default function PropertyDetailsScreen() {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
+      allowsEditing: false,
+      allowsMultipleSelection: true,
+      selectionLimit: 0,
+      orderedSelection: true,
       quality: 0.8,
     });
-    if (!result.canceled && result.assets[0]) {
-      setSelectedPhotoUri(result.assets[0].uri);
-      setPhotoCaption('');
+    if (!result.canceled && result.assets.length > 0) {
+      setSelectedPhotoUris(result.assets.map(asset => asset.uri));
+      setPhotoCaptions(result.assets.map(() => ''));
+      setPhotoWizardIndex(0);
       setShowPhotoModal(true);
     }
   };
@@ -93,25 +162,72 @@ export default function PropertyDetailsScreen() {
       quality: 0.8,
     });
     if (!result.canceled && result.assets[0]) {
-      setSelectedPhotoUri(result.assets[0].uri);
-      setPhotoCaption('');
+      setSelectedPhotoUris([result.assets[0].uri]);
+      setPhotoCaptions(['']);
+      setPhotoWizardIndex(0);
       setShowPhotoModal(true);
     }
   };
 
-  const savePhoto = () => {
-    if (!selectedPhotoUri) return;
-    const newPhoto: PropertyPhoto = {
-      id: `photo_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+  const saveSelectedPhotos = async () => {
+    if (selectedPhotoUris.length === 0 || isSavingPhoto) return;
+
+    const totalSelected = selectedPhotoUris.length;
+    setIsSavingPhoto(true);
+    setPhotoSaveProgress({ completed: 0, total: totalSelected });
+
+    const photosToSave: PropertyPhoto[] = selectedPhotoUris.map((uri, index) => ({
+      id: `photo_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
       propertyId: id as string,
-      uri: selectedPhotoUri,
-      caption: photoCaption.trim(),
+      uri,
+      caption: (photoCaptions[index] || '').trim(),
       date: new Date().toISOString(),
+    }));
+
+    let nextIndex = 0;
+    let failureCount = 0;
+    const workerCount = Math.min(3, photosToSave.length);
+
+    const saveWorker = async () => {
+      while (nextIndex < photosToSave.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        try {
+          await addPropertyPhoto(photosToSave[currentIndex]);
+        } catch {
+          failureCount += 1;
+        } finally {
+          setPhotoSaveProgress(prev => ({ completed: prev.completed + 1, total: prev.total }));
+        }
+      }
     };
-    addPropertyPhoto(newPhoto);
-    setShowPhotoModal(false);
-    setSelectedPhotoUri(null);
-    setPhotoCaption('');
+
+    try {
+      await Promise.all(Array.from({ length: workerCount }, () => saveWorker()));
+
+      resetPhotoWizard();
+      if (failureCount === 0) {
+        Alert.alert('Success', totalSelected > 1 ? `${totalSelected} photos added.` : 'Photo added.');
+      } else if (failureCount < totalSelected) {
+        Alert.alert('Partial Success', `${totalSelected - failureCount} photo(s) added. ${failureCount} failed. Please retry failed photos.`);
+      } else {
+        Alert.alert('Error', totalSelected > 1 ? 'Failed to add photos. Please try again.' : 'Failed to save photo. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error saving photo(s):', error);
+      Alert.alert('Error', totalSelected > 1 ? 'Failed to add one or more photos. Please try again.' : 'Failed to save photo. Please try again.');
+    } finally {
+      setIsSavingPhoto(false);
+      setPhotoSaveProgress({ completed: 0, total: 0 });
+    }
+  };
+
+  const handlePhotoWizardPrimaryAction = async () => {
+    if (selectedPhotoUris.length > 1 && photoWizardIndex < selectedPhotoUris.length - 1) {
+      setPhotoWizardIndex(prev => prev + 1);
+      return;
+    }
+    await saveSelectedPhotos();
   };
 
   const deletePhoto = (photoId: string) => {
@@ -127,6 +243,26 @@ export default function PropertyDetailsScreen() {
         },
       ]
     );
+  };
+
+  const openCaptionEditor = (photo: PropertyPhoto) => {
+    setEditingPhoto(photo);
+    setEditingCaption(photo.caption || '');
+  };
+
+  const saveEditedCaption = async () => {
+    if (!editingPhoto || isUpdatingCaption) return;
+    setIsUpdatingCaption(true);
+    try {
+      await updatePropertyPhoto(editingPhoto.id, { caption: editingCaption.trim() });
+      setEditingPhoto(null);
+      setEditingCaption('');
+    } catch (error) {
+      console.error('Error updating photo caption:', error);
+      Alert.alert('Error', 'Failed to update caption. Please try again.');
+    } finally {
+      setIsUpdatingCaption(false);
+    }
   };
 
   const addToCalendar = async (reminder: typeof reminders[0]) => {
@@ -205,9 +341,15 @@ export default function PropertyDetailsScreen() {
         { 
           text: "Delete", 
           style: "destructive",
-          onPress: () => {
-            deleteProperty(property.id);
-            router.back();
+          onPress: async () => {
+            try {
+              await deleteProperty(property.id);
+              router.back();
+            } catch (error) {
+              console.error('Error deleting property:', error);
+              const message = error instanceof Error ? error.message : 'Failed to delete property. Please try again.';
+              Alert.alert('Error', message);
+            }
           }
         }
       ]
@@ -222,6 +364,7 @@ export default function PropertyDetailsScreen() {
     <SafeAreaView style={styles.container} edges={["bottom"]}>
     <ScrollView 
       showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ paddingBottom: 16 }}
     >
       {/* Header */}
@@ -322,7 +465,10 @@ export default function PropertyDetailsScreen() {
                       <Text style={styles.galleryCaptionText} numberOfLines={1}>{photo.caption}</Text>
                     </View>
                   ) : null}
-                  <Text style={styles.galleryDate}>{formatDate(photo.date)}</Text>
+                  <Text style={styles.galleryDate}>{formatDate(photo.date ?? undefined)}</Text>
+                  <TouchableOpacity style={styles.galleryEditCaptionBtn} onPress={() => openCaptionEditor(photo)}>
+                    <Text style={styles.galleryEditCaptionBtnText}>{photo.caption ? 'Edit Caption' : 'Add Caption'}</Text>
+                  </TouchableOpacity>
                 </TouchableOpacity>
               ))}
             </View>
@@ -588,7 +734,7 @@ export default function PropertyDetailsScreen() {
                     </Text>
                   </View>
                   <Text style={styles.transactionMeta}>
-                    {transaction.category} • {formatDate(transaction.date)}
+                    {transaction.category} • {formatTransactionDate(transaction.date)}
                   </Text>
                 </View>
               ))
@@ -797,7 +943,15 @@ export default function PropertyDetailsScreen() {
                             {
                               text: 'Delete',
                               style: 'destructive',
-                              onPress: () => deleteReminder(reminder.id),
+                              onPress: async () => {
+                                try {
+                                  await deleteReminder(reminder.id);
+                                } catch (error) {
+                                  console.error('Error deleting reminder:', error);
+                                  const message = error instanceof Error ? error.message : 'Failed to delete reminder. Please try again.';
+                                  Alert.alert('Error', message);
+                                }
+                              },
                             },
                           ]
                         );
@@ -839,37 +993,95 @@ export default function PropertyDetailsScreen() {
 
       {/* Add Photo Modal */}
       <Modal visible={showPhotoModal} animationType="fade" transparent>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 24}
+          style={styles.modalKeyboardContainer}
+        >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Add Photo</Text>
-              <TouchableOpacity onPress={() => { setShowPhotoModal(false); setSelectedPhotoUri(null); }}>
+              <TouchableOpacity onPress={resetPhotoWizard}>
                 <X size={24} color="#6B7280" />
               </TouchableOpacity>
             </View>
-            {selectedPhotoUri && (
-              <Image source={{ uri: selectedPhotoUri }} style={styles.modalPreview} />
+            {selectedPhotoUris[photoWizardIndex] && <Image source={{ uri: selectedPhotoUris[photoWizardIndex] }} style={styles.modalPreview} />}
+            {selectedPhotoUris.length > 1 && (
+              <Text style={styles.modalCountText}>Photo {photoWizardIndex + 1} of {selectedPhotoUris.length}</Text>
             )}
             <TextInput
               style={styles.captionInput}
               placeholder="Add a caption (optional)"
               placeholderTextColor="#9CA3AF"
-              value={photoCaption}
-              onChangeText={setPhotoCaption}
+              value={photoCaptions[photoWizardIndex] || ''}
+              onChangeText={updateCurrentPhotoCaption}
             />
+            {isSavingPhoto && photoSaveProgress.total > 0 && (
+              <Text style={styles.modalProgressText}>Saving {photoSaveProgress.completed} of {photoSaveProgress.total}...</Text>
+            )}
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={styles.modalCancelBtn}
-                onPress={() => { setShowPhotoModal(false); setSelectedPhotoUri(null); }}
+                onPress={() => {
+                  if (selectedPhotoUris.length > 1 && photoWizardIndex > 0) {
+                    setPhotoWizardIndex(prev => prev - 1);
+                    return;
+                  }
+                  resetPhotoWizard();
+                }}
               >
-                <Text style={styles.modalCancelBtnText}>Cancel</Text>
+                <Text style={styles.modalCancelBtnText}>{selectedPhotoUris.length > 1 && photoWizardIndex > 0 ? 'Back' : 'Cancel'}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.modalSaveBtn} onPress={savePhoto}>
-                <Text style={styles.modalSaveBtnText}>Save Photo</Text>
+              <TouchableOpacity style={[styles.modalSaveBtn, isSavingPhoto && { opacity: 0.7 }]} onPress={handlePhotoWizardPrimaryAction} disabled={isSavingPhoto}>
+                <Text style={styles.modalSaveBtnText}>
+                  {isSavingPhoto
+                    ? 'Saving...'
+                    : (selectedPhotoUris.length > 1 && photoWizardIndex < selectedPhotoUris.length - 1 ? 'Next Photo' : (selectedPhotoUris.length > 1 ? 'Save Photos' : 'Save Photo'))}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal visible={!!editingPhoto} animationType="fade" transparent onRequestClose={() => setEditingPhoto(null)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 24}
+          style={styles.modalKeyboardContainer}
+        >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{editingPhoto?.caption ? 'Edit Caption' : 'Add Caption'}</Text>
+              <TouchableOpacity onPress={() => { setEditingPhoto(null); setEditingCaption(''); }}>
+                <X size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+            {editingPhoto?.uri ? <Image source={{ uri: editingPhoto.uri }} style={styles.modalPreview} /> : null}
+            <TextInput
+              style={styles.captionInput}
+              placeholder="Add a caption (optional)"
+              placeholderTextColor="#9CA3AF"
+              value={editingCaption}
+              onChangeText={setEditingCaption}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => { setEditingPhoto(null); setEditingCaption(''); }}
+              >
+                <Text style={styles.modalCancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalSaveBtn, isUpdatingCaption && { opacity: 0.7 }]} onPress={saveEditedCaption} disabled={isUpdatingCaption}>
+                <Text style={styles.modalSaveBtnText}>{isUpdatingCaption ? 'Saving...' : 'Save Caption'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </ScrollView>
     </SafeAreaView>
@@ -1356,12 +1568,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingBottom: 6,
   },
+  galleryEditCaptionBtn: {
+    marginHorizontal: 6,
+    marginBottom: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+  },
+  galleryEditCaptionBtnText: {
+    fontSize: 11,
+    fontWeight: "600" as const,
+    color: "#2563EB",
+  },
   modalOverlay: {
-    flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.6)",
+    width: "100%",
+    flex: 1,
     justifyContent: "center",
     alignItems: "center",
     padding: 24,
+  },
+  modalKeyboardContainer: {
+    flex: 1,
+    width: "100%",
+    justifyContent: "center",
+    alignItems: "center",
   },
   modalContent: {
     backgroundColor: "#FFFFFF",
@@ -1386,6 +1618,19 @@ const styles = StyleSheet.create({
   modalPreview: {
     width: "100%",
     height: 250,
+  },
+  modalCountText: {
+    fontSize: 13,
+    color: "#6B7280",
+    marginHorizontal: 16,
+    marginTop: 12,
+  },
+  modalProgressText: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginHorizontal: 16,
+    marginTop: -6,
+    marginBottom: 4,
   },
   captionInput: {
     margin: 16,

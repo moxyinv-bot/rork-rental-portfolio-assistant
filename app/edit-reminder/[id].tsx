@@ -10,18 +10,55 @@ import {
   Platform,
   Alert,
   Modal,
+  Linking,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { usePortfolio } from "@/hooks/portfolio-store";
 import { Reminder } from "@/types/property";
 import { REMINDER_TYPES } from "@/constants/categories";
 import { Calendar, Bell, ChevronDown, Phone, Mail, Trash2 } from "lucide-react-native";
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function EditReminderScreen() {
   const { id } = useLocalSearchParams();
   const { properties, reminders, updateReminder, deleteReminder } = usePortfolio();
   const [showPropertyDropdown, setShowPropertyDropdown] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+
+  const formatDate = (date: Date) => {
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    const year = date.getFullYear().toString().slice(-2);
+    return `${month}-${day}-${year}`;
+  };
+
+  const parseDateString = (value: string): Date => {
+    const normalized = value.replace(/\//g, '-');
+    const parts = normalized.split('-');
+    if (parts.length === 3) {
+      const [a, b, c] = parts;
+      const n1 = parseInt(a, 10);
+      const n2 = parseInt(b, 10);
+      const n3 = parseInt(c, 10);
+
+      if (!Number.isNaN(n1) && !Number.isNaN(n2) && !Number.isNaN(n3)) {
+        // MM-DD-YY or MM-DD-YYYY
+        if (a.length <= 2) {
+          const year = c.length === 2 ? n3 + 2000 : n3;
+          return new Date(year, n1 - 1, n2);
+        }
+
+        // YYYY-MM-DD
+        if (a.length === 4) {
+          return new Date(n1, n2 - 1, n3);
+        }
+      }
+    }
+    const fallback = new Date(value);
+    return Number.isNaN(fallback.getTime()) ? new Date() : fallback;
+  };
 
   const reminder = reminders.find(r => r.id === id);
 
@@ -41,11 +78,12 @@ export default function EditReminderScreen() {
         propertyId: reminder.propertyId,
         type: reminder.type,
         title: reminder.title,
-        dueDate: reminder.dueDate,
+        dueDate: formatDate(parseDateString(reminder.dueDate)),
         notes: reminder.notes || "",
         recipientPhone: reminder.recipientPhone || "",
         recipientEmail: reminder.recipientEmail || "",
       });
+      setSelectedDate(parseDateString(reminder.dueDate));
     }
   }, [reminder]);
 
@@ -103,7 +141,8 @@ export default function EditReminderScreen() {
       router.back();
     } catch (error) {
       console.error('Error updating reminder:', error);
-      Alert.alert('Error', 'Failed to update reminder. Please try again.');
+      const message = error instanceof Error ? error.message : 'Failed to update reminder. Please try again.';
+      Alert.alert('Error', message);
     }
   };
 
@@ -123,12 +162,48 @@ export default function EditReminderScreen() {
               router.back();
             } catch (error) {
               console.error('Error deleting reminder:', error);
-              Alert.alert('Error', 'Failed to delete reminder. Please try again.');
+              const message = error instanceof Error ? error.message : 'Failed to delete reminder. Please try again.';
+              Alert.alert('Error', message);
             }
           }
         }
       ]
     );
+  };
+
+  const handleSendMessageNow = async () => {
+    const targetPhone = formData.recipientPhone.trim();
+    if (!targetPhone) {
+      Alert.alert("Missing phone number", "Add a recipient phone number first.");
+      return;
+    }
+
+    const selectedProperty = properties.find(p => p.id === formData.propertyId);
+    const messageParts = [
+      `Reminder: ${formData.title.trim() || "Property reminder"}`,
+      `Due: ${formData.dueDate || "N/A"}`,
+      selectedProperty?.name ? `Property: ${selectedProperty.name}` : "",
+      formData.notes.trim() ? `Notes: ${formData.notes.trim()}` : "",
+    ].filter(Boolean);
+
+    const body = encodeURIComponent(messageParts.join("\n"));
+    const phone = encodeURIComponent(targetPhone);
+    const smsUrl = Platform.OS === "ios"
+      ? `sms:${phone}&body=${body}`
+      : `sms:${phone}?body=${body}`;
+
+    try {
+      const canOpen = await Linking.canOpenURL(smsUrl);
+      if (!canOpen) {
+        Alert.alert("SMS unavailable", "Your device cannot open the SMS composer.");
+        return;
+      }
+
+      await Linking.openURL(smsUrl);
+    } catch (error) {
+      console.error("Failed to open SMS composer:", error);
+      Alert.alert("SMS unavailable", "Could not open the SMS composer.");
+    }
   };
 
   const getSelectedProperty = () => {
@@ -185,10 +260,12 @@ export default function EditReminderScreen() {
     <SafeAreaView style={styles.container} edges={["bottom"]}>
     <KeyboardAvoidingView 
       behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 20}
       style={{ flex: 1 }}
     >
       <ScrollView 
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ paddingBottom: 16 }}
       >
         <View style={styles.form}>
@@ -249,15 +326,15 @@ export default function EditReminderScreen() {
           {/* Due Date */}
           <View style={styles.section}>
             <Text style={styles.label}>Due Date *</Text>
-            <View style={[styles.dateContainer, !formData.dueDate.trim() && styles.inputHighlight]}>
+            <TouchableOpacity
+              style={[styles.dateContainer, !formData.dueDate.trim() && styles.inputHighlight]}
+              onPress={() => setShowDatePicker(true)}
+            >
               <Calendar size={20} color="#6B7280" />
-              <TextInput
-                style={styles.dateInput}
-                value={formData.dueDate}
-                onChangeText={(text) => setFormData({ ...formData, dueDate: text })}
-                placeholder="mm-dd-yy"
-              />
-            </View>
+              <Text style={[styles.dateInput, !formData.dueDate ? styles.placeholderText : undefined]}>
+                {formData.dueDate || 'MM-DD-YY'}
+              </Text>
+            </TouchableOpacity>
           </View>
 
           {/* Quick Date Options */}
@@ -277,7 +354,8 @@ export default function EditReminderScreen() {
                   onPress={() => {
                     const date = new Date();
                     date.setDate(date.getDate() + option.days);
-                    setFormData({ ...formData, dueDate: date.toISOString().split('T')[0] });
+                    setSelectedDate(date);
+                    setFormData({ ...formData, dueDate: formatDate(date) });
                   }}
                 >
                   <Text style={styles.quickDateOptionText}>{option.label}</Text>
@@ -328,6 +406,14 @@ export default function EditReminderScreen() {
               multiline
               numberOfLines={4}
             />
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.label}>Quick Actions</Text>
+            <TouchableOpacity style={styles.messageNowButton} onPress={handleSendMessageNow}>
+              <Phone size={16} color="#FFFFFF" />
+              <Text style={styles.messageNowButtonText}>Send Message Now</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Action Buttons */}
@@ -391,6 +477,21 @@ export default function EditReminderScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {showDatePicker && (
+        <DateTimePicker
+          value={selectedDate}
+          mode="date"
+          display="default"
+          onChange={(event, date) => {
+            setShowDatePicker(Platform.OS === 'ios');
+            if (event.type === 'set' && date) {
+              setSelectedDate(date);
+              setFormData({ ...formData, dueDate: formatDate(date) });
+            }
+          }}
+        />
+      )}
     </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -596,6 +697,21 @@ const styles = StyleSheet.create({
     padding: 12,
     fontSize: 16,
     color: "#111827",
+  },
+  messageNowButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#2563EB",
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  messageNowButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "600" as const,
   },
   actions: {
     flexDirection: "row",

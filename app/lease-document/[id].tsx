@@ -85,7 +85,7 @@ export default function LeaseDocumentScreen() {
     setIsEditing(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!document) return;
     
     if (!editTitle.trim()) {
@@ -108,8 +108,14 @@ export default function LeaseDocumentScreen() {
       notes: editNotes.trim() || undefined
     };
 
-    updateLeaseDocument(document.id, updates);
-    setIsEditing(false);
+    try {
+      await updateLeaseDocument(document.id, updates);
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Error updating lease document:', error);
+      const message = error instanceof Error ? error.message : 'Failed to update document. Please try again.';
+      Alert.alert('Error', message);
+    }
   };
 
   const handleCancel = () => {
@@ -127,9 +133,15 @@ export default function LeaseDocumentScreen() {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => {
-            deleteLeaseDocument(document.id);
-            router.back();
+          onPress: async () => {
+            try {
+              await deleteLeaseDocument(document.id);
+              router.back();
+            } catch (error) {
+              console.error('Error deleting lease document:', error);
+              const message = error instanceof Error ? error.message : 'Failed to delete document. Please try again.';
+              Alert.alert('Error', message);
+            }
           }
         }
       ]

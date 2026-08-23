@@ -93,7 +93,7 @@ export interface PropertyPhoto {
   propertyId: string;
   uri: string;
   caption: string;
-  date: string;
+  date?: string;
 }
 
 export interface LeaseFolder {

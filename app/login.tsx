@@ -11,7 +11,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Building2 } from "lucide-react-native";
 
 export default function LoginScreen() {
-  const { isSigningIn, error, signIn, clearError } = useAuth();
+  const { isSigningIn, error, signIn, signInGuest, clearError } = useAuth();
 
   return (
     <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
@@ -81,6 +81,15 @@ export default function LoginScreen() {
           >
             <AppleIcon />
             <Text style={styles.appleButtonText}>Continue with Apple</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.guestButton, isSigningIn && styles.buttonDisabled]}
+            onPress={() => signInGuest()}
+            disabled={isSigningIn}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.guestButtonText}>Continue as Guest</Text>
           </TouchableOpacity>
         </View>
 
@@ -222,6 +231,21 @@ const styles = StyleSheet.create({
   },
   appleButtonText: {
     color: "#FFFFFF",
+    fontSize: 17,
+    fontWeight: "600" as const,
+  },
+  guestButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(59, 130, 246, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(59, 130, 246, 0.35)",
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 14,
+  },
+  guestButtonText: {
+    color: "#BFDBFE",
     fontSize: 17,
     fontWeight: "600" as const,
   },

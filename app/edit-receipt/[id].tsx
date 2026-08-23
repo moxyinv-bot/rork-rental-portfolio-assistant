@@ -132,7 +132,8 @@ export default function EditReceiptScreen() {
       router.back();
     } catch (error) {
       console.error('Error updating receipt:', error);
-      Alert.alert('Error', 'Failed to update receipt. Please try again.');
+      const message = error instanceof Error ? error.message : 'Failed to update receipt. Please try again.';
+      Alert.alert('Error', message);
     } finally {
       setIsLoading(false);
     }
@@ -155,7 +156,8 @@ export default function EditReceiptScreen() {
               router.back();
             } catch (error) {
               console.error('Error deleting receipt:', error);
-              Alert.alert('Error', 'Failed to delete receipt. Please try again.');
+              const message = error instanceof Error ? error.message : 'Failed to delete receipt. Please try again.';
+              Alert.alert('Error', message);
             } finally {
               setIsLoading(false);
             }

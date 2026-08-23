@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Keyboard,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { usePortfolio } from "@/hooks/portfolio-store";
@@ -21,6 +22,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 export default function EditPropertyScreen() {
   const { id } = useLocalSearchParams();
   const { properties, updateProperty } = usePortfolio();
+  const [isSaving, setIsSaving] = useState(false);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
   
   const property = properties.find(p => p.id === id);
   
@@ -53,6 +56,20 @@ export default function EditPropertyScreen() {
     notes: "",
     imageUri: "",
   });
+
+  React.useEffect(() => {
+    const showSub = Keyboard.addListener("keyboardDidShow", (event) => {
+      setKeyboardOffset(event.endCoordinates?.height || 0);
+    });
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardOffset(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Load property data when component mounts
   useEffect(() => {
@@ -107,6 +124,8 @@ export default function EditPropertyScreen() {
   };
 
   const handleSave = () => {
+    if (isSaving) return;
+
     const missingFields = getRequiredFields();
     
     if (missingFields.length > 0) {
@@ -125,7 +144,10 @@ export default function EditPropertyScreen() {
   };
 
   const saveProperty = async () => {
+    if (isSaving) return;
+
     try {
+      setIsSaving(true);
       const updatedProperty: Partial<Property> = {
         name: formData.name.trim() || 'Untitled Property',
         address: formData.address.trim() || 'Address not provided',
@@ -162,7 +184,10 @@ export default function EditPropertyScreen() {
       router.back();
     } catch (error) {
       console.error('Error updating property:', error);
-      Alert.alert('Error', 'Failed to update property. Please try again.');
+      const message = error instanceof Error ? error.message : 'Failed to update property. Please try again.';
+      Alert.alert('Error', message);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -183,11 +208,13 @@ export default function EditPropertyScreen() {
     <SafeAreaView style={styles.container} edges={["bottom"]}>
     <KeyboardAvoidingView 
       behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 24}
       style={{ flex: 1 }}
     >
       <ScrollView 
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 16 }}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingBottom: Math.max(16, keyboardOffset + 24) }}
       >
         <View style={styles.form}>
           {/* Basic Information */}
@@ -491,11 +518,11 @@ export default function EditPropertyScreen() {
 
           {/* Action Buttons */}
           <View style={styles.actions}>
-            <TouchableOpacity style={styles.cancelButton} onPress={() => router.back()}>
+            <TouchableOpacity style={styles.cancelButton} onPress={() => router.back()} disabled={isSaving}>
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-              <Text style={styles.saveButtonText}>Update Property</Text>
+            <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={isSaving}>
+              <Text style={styles.saveButtonText}>{isSaving ? 'Saving...' : 'Update Property'}</Text>
             </TouchableOpacity>
           </View>
         </View>

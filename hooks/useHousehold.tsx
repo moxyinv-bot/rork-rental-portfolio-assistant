@@ -26,12 +26,54 @@ export interface HouseholdMember {
 
 const ACTIVE_HOUSEHOLD_KEY = 'active_household_id';
 
+type HouseholdMemberRow = {
+  id: string;
+  household_id: string;
+  user_id: string;
+  role: 'owner' | 'member';
+  joined_at: string;
+};
+
+type ProfileRow = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  avatar_url: string | null;
+};
+
+const displayNameFromEmail = (email: string | null | undefined): string | null => {
+  if (!email) return null;
+  const local = email.split('@')[0]?.trim();
+  return local || null;
+};
+
 export const [HouseholdProvider, useHousehold] = createContextHook(() => {
   const { user } = useAuth();
   const [household, setHousehold] = useState<Household | null>(null);
   const [members, setMembers] = useState<HouseholdMember[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const ensureCurrentProfile = useCallback(async () => {
+    if (!user || user.id === 'guest') return;
+
+    const { error: upsertError } = await supabase
+      .from('profiles')
+      .upsert(
+        {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          avatar_url: user.picture,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' }
+      );
+
+    if (upsertError) {
+      console.error('Error ensuring current user profile:', upsertError);
+    }
+  }, [user, ensureCurrentProfile]);
 
   // Load active household when user changes
   useEffect(() => {
@@ -70,6 +112,7 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
     try {
       setIsLoading(true);
       setError(null);
+      await ensureCurrentProfile();
 
       // Check for stored active household
       const storedId = await AsyncStorage.getItem(ACTIVE_HOUSEHOLD_KEY);
@@ -80,32 +123,65 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
         .select('household_id')
         .eq('user_id', user.id);
 
-      if (memErr) throw memErr;
+      if (memErr) {
+        console.error('Household membership query failed for user:', user.id, memErr);
+        const message = memErr.message || 'Failed to query household memberships';
+        throw new Error(message);
+      }
 
       if (!memberships || memberships.length === 0) {
+        await AsyncStorage.removeItem(ACTIVE_HOUSEHOLD_KEY);
         setHousehold(null);
         setMembers([]);
         setIsLoading(false);
         return;
       }
 
-      // Use stored household if still valid, otherwise use the first one
-      const targetId = storedId && memberships.some(m => m.household_id === storedId)
+      // Use stored household only if it is still valid for this user.
+      let targetId = storedId && memberships.some(m => m.household_id === storedId)
         ? storedId
-        : memberships[0].household_id;
+        : null;
 
-      await loadHouseholdData(targetId);
+      if (!targetId) {
+        targetId = memberships[0].household_id;
+      }
+
+      let loadedHousehold = await loadHouseholdData(targetId);
+
+      if (!loadedHousehold) {
+        for (const membership of memberships) {
+          const candidateId = membership.household_id;
+          if (!candidateId) continue;
+          const candidateHousehold = await loadHouseholdData(candidateId);
+          if (candidateHousehold) {
+            loadedHousehold = candidateHousehold;
+            targetId = candidateId;
+            break;
+          }
+        }
+      }
+
+      if (!loadedHousehold) {
+        await AsyncStorage.removeItem(ACTIVE_HOUSEHOLD_KEY);
+        setHousehold(null);
+        setMembers([]);
+        setError('Failed to load household');
+        return;
+      }
+
       await loadMembers(targetId);
       await AsyncStorage.setItem(ACTIVE_HOUSEHOLD_KEY, targetId);
     } catch (err) {
       console.error('Error loading household:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load household');
+      const fallback = `Failed to load household for user ${user?.id ?? 'unknown'}`;
+      setError(err instanceof Error ? err.message || fallback : fallback);
     } finally {
       setIsLoading(false);
     }
   }, [user]);
+  
 
-  const loadHouseholdData = useCallback(async (householdId: string) => {
+  const loadHouseholdData = useCallback(async (householdId: string): Promise<Household | null> => {
     const { data, error: err } = await supabase
       .from('households')
       .select('*')
@@ -114,22 +190,18 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
 
     if (err) {
       console.error('Error loading household data:', err);
-      return;
+      return null;
     }
-    setHousehold(data as Household);
+
+    const nextHousehold = data as Household;
+    setHousehold(nextHousehold);
+    return nextHousehold;
   }, []);
 
   const loadMembers = useCallback(async (householdId: string) => {
     const { data, error: err } = await supabase
       .from('household_members')
-      .select(`
-        id,
-        household_id,
-        user_id,
-        role,
-        joined_at,
-        profiles!inner(name, email, avatar_url)
-      `)
+      .select('id, household_id, user_id, role, joined_at')
       .eq('household_id', householdId)
       .order('joined_at', { ascending: true });
 
@@ -138,21 +210,52 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
       return;
     }
 
-    const formattedMembers: HouseholdMember[] = (data || []).map((m: any) => ({
-      id: m.id,
-      household_id: m.household_id,
-      user_id: m.user_id,
-      role: m.role,
-      joined_at: m.joined_at,
-      profile: {
-        name: m.profiles?.name ?? null,
-        email: m.profiles?.email ?? null,
-        avatar_url: m.profiles?.avatar_url ?? null,
-      },
-    }));
+    const memberRows = (data || []) as HouseholdMemberRow[];
+    const userIds = Array.from(new Set(memberRows.map(member => member.user_id).filter(Boolean)));
+
+    let profilesById: Record<string, ProfileRow> = {};
+    if (userIds.length > 0) {
+      const { data: profilesData, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, name, email, avatar_url')
+        .in('id', userIds);
+
+      if (profilesError) {
+        console.error('Error loading member profiles:', profilesError);
+      } else {
+        profilesById = ((profilesData || []) as ProfileRow[]).reduce<Record<string, ProfileRow>>((acc, profile) => {
+          acc[profile.id] = profile;
+          return acc;
+        }, {});
+      }
+    }
+
+    const formattedMembers: HouseholdMember[] = memberRows.map((member, index) => {
+      const profile = profilesById[member.user_id];
+      const isCurrentUser = member.user_id === user?.id;
+      const email = profile?.email ?? (isCurrentUser ? (user?.email ?? null) : null);
+      const name =
+        profile?.name ??
+        (isCurrentUser ? (user?.name ?? null) : null) ??
+        displayNameFromEmail(email) ??
+        `Member ${index + 1}`;
+
+      return {
+        id: member.id,
+        household_id: member.household_id,
+        user_id: member.user_id,
+        role: member.role,
+        joined_at: member.joined_at,
+        profile: {
+          name,
+          email,
+          avatar_url: profile?.avatar_url ?? null,
+        },
+      };
+    });
 
     setMembers(formattedMembers);
-  }, []);
+  }, [user?.email, user?.id, user?.name]);
 
   const createHousehold = useCallback(async (name: string): Promise<Household | null> => {
     if (!user) return null;
@@ -178,6 +281,7 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
       if (memberErr) throw memberErr;
 
       await AsyncStorage.setItem(ACTIVE_HOUSEHOLD_KEY, householdData.id);
+      setError(null);
       setHousehold(householdData as Household);
       await loadMembers(householdData.id);
       return householdData as Household;
@@ -214,13 +318,14 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
 
       if (memberErr) {
         if (memberErr.code === '23505') {
-          setError('You are already a member of this household');
+          setError(null);
         } else {
           throw memberErr;
         }
       }
 
       await AsyncStorage.setItem(ACTIVE_HOUSEHOLD_KEY, householdData.id);
+      setError(null);
       setHousehold(householdData as Household);
       await loadMembers(householdData.id);
       return householdData as Household;

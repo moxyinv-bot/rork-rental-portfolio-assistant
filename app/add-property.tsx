@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Keyboard,
 } from "react-native";
 import { router } from "expo-router";
 import { usePortfolio } from "@/hooks/portfolio-store";
@@ -20,6 +21,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function AddPropertyScreen() {
   const { addProperty } = usePortfolio();
+  const [isSaving, setIsSaving] = useState(false);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
   
   const [formData, setFormData] = useState({
     name: "",
@@ -51,6 +54,20 @@ export default function AddPropertyScreen() {
     imageUri: "",
   });
 
+  React.useEffect(() => {
+    const showSub = Keyboard.addListener("keyboardDidShow", (event) => {
+      setKeyboardOffset(event.endCoordinates?.height || 0);
+    });
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardOffset(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
   const getRequiredFields = () => {
     const required = [];
     if (!formData.name.trim()) required.push('Property Name');
@@ -61,6 +78,8 @@ export default function AddPropertyScreen() {
   };
 
   const handleSave = () => {
+    if (isSaving) return;
+
     const missingFields = getRequiredFields();
     
     if (missingFields.length > 0) {
@@ -79,7 +98,10 @@ export default function AddPropertyScreen() {
   };
 
   const saveProperty = async () => {
+    if (isSaving) return;
+
     try {
+      setIsSaving(true);
       const newProperty: Property = {
         id: Date.now().toString(),
         name: formData.name.trim() || 'Untitled Property',
@@ -114,12 +136,18 @@ export default function AddPropertyScreen() {
       };
 
       console.log('Saving property:', newProperty);
-      await addProperty(newProperty);
+      const savedProperty = await addProperty(newProperty);
+      if (!savedProperty?.id) {
+        throw new Error('Property save did not return a valid record.');
+      }
       Alert.alert('Success', 'Property saved successfully!');
       router.back();
     } catch (error) {
       console.error('Error saving property:', error);
-      Alert.alert('Error', 'Failed to save property. Please try again.');
+      const message = error instanceof Error ? error.message : 'Failed to save property. Please try again.';
+      Alert.alert('Error', message);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -140,11 +168,13 @@ export default function AddPropertyScreen() {
     <SafeAreaView style={styles.container} edges={["bottom"]}>
     <KeyboardAvoidingView 
       behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 24}
       style={{ flex: 1 }}
     >
       <ScrollView 
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 16 }}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingBottom: Math.max(16, keyboardOffset + 24) }}
       >
         <View style={styles.form}>
           {/* Basic Information */}
@@ -448,11 +478,11 @@ export default function AddPropertyScreen() {
 
           {/* Action Buttons */}
           <View style={styles.actions}>
-            <TouchableOpacity style={styles.cancelButton} onPress={() => router.back()}>
+            <TouchableOpacity style={styles.cancelButton} onPress={() => router.back()} disabled={isSaving}>
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-              <Text style={styles.saveButtonText}>Save Property</Text>
+            <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={isSaving}>
+              <Text style={styles.saveButtonText}>{isSaving ? 'Saving...' : 'Save Property'}</Text>
             </TouchableOpacity>
           </View>
         </View>

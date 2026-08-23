@@ -84,8 +84,8 @@ export default function CreateLeaseDocumentScreen() {
         createdAt: new Date().toISOString()
       };
       
-      await addLeaseFolder(folder);
-      setSelectedFolder(folder.id);
+      const savedFolder = await addLeaseFolder(folder);
+      setSelectedFolder(savedFolder.id);
       setShowCreateFolderModal(false);
       setNewFolderName('');
     } catch (error) {
@@ -131,7 +131,10 @@ export default function CreateLeaseDocumentScreen() {
         notes: notes.trim() || undefined
       };
 
-      await addLeaseDocument(document);
+      const savedDocument = await addLeaseDocument(document);
+      if (!savedDocument?.id) {
+        throw new Error('Document save did not return a valid record.');
+      }
       
       Alert.alert(
         'Success',
@@ -145,7 +148,8 @@ export default function CreateLeaseDocumentScreen() {
       );
     } catch (error) {
       console.error('Error saving document:', error);
-      Alert.alert('Error', 'Failed to save document. Please try again.');
+      const message = error instanceof Error ? error.message : 'Failed to save document. Please try again.';
+      Alert.alert('Error', message);
     }
   };
 

@@ -81,7 +81,11 @@ export default function LeaseFolderScreen() {
     if (Platform.OS === 'web') {
       const newName = prompt('Edit Folder\n\nEnter new folder name:', folder.name);
       if (newName && newName.trim() && newName.trim() !== folder.name) {
-        updateLeaseFolder(folder.id, { name: newName.trim() });
+        updateLeaseFolder(folder.id, { name: newName.trim() }).catch((error) => {
+          console.error('Error updating folder:', error);
+          const message = error instanceof Error ? error.message : 'Failed to update folder. Please try again.';
+          Alert.alert('Error', message);
+        });
       }
     } else {
       Alert.prompt(
@@ -93,7 +97,11 @@ export default function LeaseFolderScreen() {
             text: 'Save',
             onPress: (newName?: string) => {
               if (newName?.trim() && newName.trim() !== folder.name) {
-                updateLeaseFolder(folder.id, { name: newName.trim() });
+                updateLeaseFolder(folder.id, { name: newName.trim() }).catch((error) => {
+                  console.error('Error updating folder:', error);
+                  const message = error instanceof Error ? error.message : 'Failed to update folder. Please try again.';
+                  Alert.alert('Error', message);
+                });
               }
             }
           }
@@ -116,8 +124,14 @@ export default function LeaseFolderScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            await deleteLeaseFolder(folder.id);
-            router.back();
+            try {
+              await deleteLeaseFolder(folder.id);
+              router.back();
+            } catch (error) {
+              console.error('Error deleting folder:', error);
+              const message = error instanceof Error ? error.message : 'Failed to delete folder. Please try again.';
+              Alert.alert('Error', message);
+            }
           }
         }
       ]
@@ -133,7 +147,15 @@ export default function LeaseFolderScreen() {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => deleteLeaseDocument(document.id)
+          onPress: async () => {
+            try {
+              await deleteLeaseDocument(document.id);
+            } catch (error) {
+              console.error('Error deleting document:', error);
+              const message = error instanceof Error ? error.message : 'Failed to delete document. Please try again.';
+              Alert.alert('Error', message);
+            }
+          }
         }
       ]
     );

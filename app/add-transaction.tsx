@@ -21,6 +21,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function AddTransactionScreen() {
   const { properties, addTransaction } = usePortfolio();
+  const [isSaving, setIsSaving] = useState(false);
   const [showPropertyDropdown, setShowPropertyDropdown] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -54,6 +55,8 @@ export default function AddTransactionScreen() {
   };
 
   const handleSave = () => {
+    if (isSaving) return;
+
     const missingFields = getRequiredFields();
     
     if (missingFields.length > 0) {
@@ -72,7 +75,10 @@ export default function AddTransactionScreen() {
   };
 
   const saveTransaction = async () => {
+    if (isSaving) return;
+
     try {
+      setIsSaving(true);
       const newTransaction: Transaction = {
         id: Date.now().toString(),
         propertyId: formData.propertyId || properties[0]?.id || 'no-property',
@@ -90,7 +96,10 @@ export default function AddTransactionScreen() {
       router.back();
     } catch (error) {
       console.error('Error saving transaction:', error);
-      Alert.alert('Error', 'Failed to save transaction. Please try again.');
+      const message = error instanceof Error ? error.message : 'Failed to save transaction. Please try again.';
+      Alert.alert('Error', message);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -228,11 +237,11 @@ export default function AddTransactionScreen() {
 
           {/* Action Buttons */}
           <View style={styles.actions}>
-            <TouchableOpacity style={styles.cancelButton} onPress={() => router.back()}>
+            <TouchableOpacity style={styles.cancelButton} onPress={() => router.back()} disabled={isSaving}>
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-              <Text style={styles.saveButtonText}>Save Transaction</Text>
+            <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={isSaving}>
+              <Text style={styles.saveButtonText}>{isSaving ? 'Saving...' : 'Save Transaction'}</Text>
             </TouchableOpacity>
           </View>
         </View>

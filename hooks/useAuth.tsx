@@ -1,17 +1,27 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from "react";
 import { Platform } from "react-native";
+import * as Crypto from "expo-crypto";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 import * as SecureStore from "expo-secure-store";
 import { supabase } from "@/lib/supabase";
 
-const AUTH_URL = process.env.EXPO_PUBLIC_RORK_AUTH_URL!;
-const APP_KEY = process.env.EXPO_PUBLIC_RORK_APP_KEY!;
-const PROJECT_ID = process.env.EXPO_PUBLIC_PROJECT_ID!;
+// Public Rork client configuration is baked into the bundle so preview APKs
+// do not depend on EAS environment variables.
+const AUTH_URL = "https://api.rork.com";
+const APP_KEY = "rpk_gms3l8hj9cag5cfau127pccgjtac3jne";
+const PROJECT_ID = "7qnyyg8myr2908b1ajb2f";
+const OAUTH_ACCESS_TOKEN_KEY = "rork_access_token";
+const OAUTH_REFRESH_TOKEN_KEY = "rork_refresh_token";
+const GUEST_MODE_KEY = "rork_guest_mode";
 
 function generateCodeVerifier(): string {
   const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
+  if (Platform.OS === "web" && typeof globalThis.crypto?.getRandomValues === "function") {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    bytes.set(Crypto.getRandomBytes(32));
+  }
   return btoa(String.fromCharCode(...bytes))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
@@ -19,12 +29,19 @@ function generateCodeVerifier(): string {
 }
 
 async function generateCodeChallenge(verifier: string): Promise<string> {
-  const data = new TextEncoder().encode(verifier);
-  const hash = await crypto.subtle.digest("SHA-256", data);
-  return btoa(String.fromCharCode(...new Uint8Array(hash)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  if (Platform.OS === "web" && typeof globalThis.crypto?.subtle?.digest === "function") {
+    const data = new TextEncoder().encode(verifier);
+    const hash = await globalThis.crypto.subtle.digest("SHA-256", data);
+    return btoa(String.fromCharCode(...new Uint8Array(hash)))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+  }
+
+  const digest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, verifier, {
+    encoding: Crypto.CryptoEncoding.BASE64,
+  });
+  return digest.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 export interface AuthUser {
@@ -34,13 +51,22 @@ export interface AuthUser {
   picture?: string;
 }
 
-function userFromToken(token: string): AuthUser | null {
+function parseTokenPayload(token: string): Record<string, any> | null {
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
 
     const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const payload = JSON.parse(atob(base64));
+    return JSON.parse(atob(base64));
+  } catch {
+    return null;
+  }
+}
+
+function userFromToken(token: string): AuthUser | null {
+  try {
+    const payload = parseTokenPayload(token);
+    if (!payload) return null;
 
     if (payload.exp && payload.exp * 1000 < Date.now()) {
       return null;
@@ -63,6 +89,7 @@ interface AuthContextType {
   isSigningIn: boolean;
   error: string | null;
   signIn: (provider: "google" | "apple") => Promise<void>;
+  signInGuest: () => Promise<void>;
   signOut: () => Promise<void>;
   clearError: () => void;
 }
@@ -90,13 +117,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function checkAuth() {
     try {
       const accessToken = Platform.OS === "web"
-        ? localStorage.getItem("access_token")
-        : await SecureStore.getItemAsync("access_token");
+        ? localStorage.getItem(OAUTH_ACCESS_TOKEN_KEY)
+        : await SecureStore.getItemAsync(OAUTH_ACCESS_TOKEN_KEY);
 
       if (!accessToken) {
         const refreshTokenStored = Platform.OS === "web"
-          ? localStorage.getItem("refresh_token")
-          : await SecureStore.getItemAsync("refresh_token");
+          ? localStorage.getItem(OAUTH_REFRESH_TOKEN_KEY)
+          : await SecureStore.getItemAsync(OAUTH_REFRESH_TOKEN_KEY);
         if (refreshTokenStored) {
           await refreshToken();
         }
@@ -119,6 +146,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function syncProfile(userData: AuthUser) {
     try {
+      if (userData.id === "guest") {
+        return;
+      }
       await supabase.from("profiles").upsert({
         id: userData.id,
         email: userData.email,
@@ -242,21 +272,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { access_token, refresh_token, user: userData } = await response.json();
 
     if (Platform.OS === "web") {
-      localStorage.setItem("access_token", access_token);
-      localStorage.setItem("refresh_token", refresh_token);
+      localStorage.setItem(OAUTH_ACCESS_TOKEN_KEY, access_token);
+      localStorage.setItem(OAUTH_REFRESH_TOKEN_KEY, refresh_token);
     } else {
-      await SecureStore.setItemAsync("access_token", access_token);
-      await SecureStore.setItemAsync("refresh_token", refresh_token);
+      await SecureStore.setItemAsync(OAUTH_ACCESS_TOKEN_KEY, access_token);
+      await SecureStore.setItemAsync(OAUTH_REFRESH_TOKEN_KEY, refresh_token);
     }
 
-    setUser(userData);
-    await syncProfile(userData);
+    const tokenUser = userFromToken(access_token);
+    const normalizedUser: AuthUser = {
+      id: tokenUser?.id || userData?.id,
+      email: userData?.email || tokenUser?.email || "",
+      name: userData?.name || tokenUser?.name,
+      picture: userData?.picture || tokenUser?.picture,
+    };
+
+    if (!normalizedUser.id) {
+      throw new Error("Sign in completed but no user id was found in token/response");
+    }
+
+    setUser(normalizedUser);
+    await syncProfile(normalizedUser);
+  }
+
+  async function signInGuest() {
+    setIsSigningIn(true);
+    setError(null);
+    try {
+      const guestUser: AuthUser = {
+        id: "guest",
+        email: "guest@local",
+        name: "Guest",
+      };
+
+      if (Platform.OS === "web") {
+        localStorage.setItem(GUEST_MODE_KEY, "true");
+        localStorage.removeItem(OAUTH_ACCESS_TOKEN_KEY);
+        localStorage.removeItem(OAUTH_REFRESH_TOKEN_KEY);
+      } else {
+        await SecureStore.setItemAsync(GUEST_MODE_KEY, "true");
+        await SecureStore.deleteItemAsync(OAUTH_ACCESS_TOKEN_KEY);
+        await SecureStore.deleteItemAsync(OAUTH_REFRESH_TOKEN_KEY);
+      }
+
+      setUser(guestUser);
+    } catch (err) {
+      console.error("Guest sign in failed:", err);
+      setError(err instanceof Error ? err.message : "Guest sign in failed");
+    } finally {
+      setIsSigningIn(false);
+    }
   }
 
   async function refreshToken() {
     const storedRefreshToken = Platform.OS === "web"
-      ? localStorage.getItem("refresh_token")
-      : await SecureStore.getItemAsync("refresh_token");
+      ? localStorage.getItem(OAUTH_REFRESH_TOKEN_KEY)
+      : await SecureStore.getItemAsync(OAUTH_REFRESH_TOKEN_KEY);
 
     if (!storedRefreshToken) {
       setUser(null);
@@ -277,9 +348,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { access_token } = await response.json();
 
     if (Platform.OS === "web") {
-      localStorage.setItem("access_token", access_token);
+      localStorage.setItem(OAUTH_ACCESS_TOKEN_KEY, access_token);
     } else {
-      await SecureStore.setItemAsync("access_token", access_token);
+      await SecureStore.setItemAsync(OAUTH_ACCESS_TOKEN_KEY, access_token);
     }
 
     const decoded = userFromToken(access_token);
@@ -291,17 +362,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signOut() {
     if (Platform.OS === "web") {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
+      localStorage.removeItem(OAUTH_ACCESS_TOKEN_KEY);
+      localStorage.removeItem(OAUTH_REFRESH_TOKEN_KEY);
+      localStorage.removeItem(GUEST_MODE_KEY);
     } else {
-      await SecureStore.deleteItemAsync("access_token");
-      await SecureStore.deleteItemAsync("refresh_token");
+      await SecureStore.deleteItemAsync(OAUTH_ACCESS_TOKEN_KEY);
+      await SecureStore.deleteItemAsync(OAUTH_REFRESH_TOKEN_KEY);
+      await SecureStore.deleteItemAsync(GUEST_MODE_KEY);
     }
     setUser(null);
   }
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, isSigningIn, error, signIn, signOut, clearError }}>
+    <AuthContext.Provider value={{ user, isLoading, isSigningIn, error, signIn, signInGuest, signOut, clearError }}>
       {children}
     </AuthContext.Provider>
   );
