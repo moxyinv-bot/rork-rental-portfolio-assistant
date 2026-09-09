@@ -1,28 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, router } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import Constants from "expo-constants";
 import React, { useEffect, useState } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { ActivityIndicator, Platform, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { PortfolioProvider } from "@/hooks/portfolio-store";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { HouseholdProvider } from "@/hooks/useHousehold";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
 const queryClient = new QueryClient();
-const DEBUG_FIX_TAG = "fixpack-2026-08-08-a";
-
-function BuildDebugBadge() {
-  const version = Constants.expoConfig?.version ?? "unknown";
-  const runtime = Constants.expoConfig?.runtimeVersion ?? "none";
-
-  return (
-    <View pointerEvents="none" style={styles.debugBadge}>
-      <Text style={styles.debugBadgeText}>{`DBG ${version} ${Platform.OS} ${runtime} ${DEBUG_FIX_TAG}`}</Text>
-    </View>
-  );
-}
 
 function RootLayoutNav() {
   return (
@@ -113,7 +100,6 @@ export default function RootLayout() {
               <PortfolioProvider>
                 <AuthGate>
                   <RootLayoutNav />
-                  <BuildDebugBadge />
                 </AuthGate>
               </PortfolioProvider>
             </HouseholdProvider>
@@ -123,24 +109,3 @@ export default function RootLayout() {
     </ErrorBoundary>
   );
 }
-
-const styles = StyleSheet.create({
-  debugBadge: {
-    position: "absolute",
-    right: 8,
-    bottom: 8,
-    backgroundColor: "rgba(0,0,0,0.75)",
-    borderColor: "rgba(255,255,255,0.25)",
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    zIndex: 9999,
-  },
-  debugBadgeText: {
-    color: "#FFFFFF",
-    fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 0.3,
-  },
-});

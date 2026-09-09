@@ -12,20 +12,8 @@ import {
 import { router } from "expo-router";
 import { Plus, TrendingUp, TrendingDown, Filter, Calendar, Download } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { usePortfolio } from "@/hooks/portfolio-store";
+import { usePortfolio, parseTransactionDate } from "@/hooks/portfolio-store";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@/constants/categories";
-
-// Utility function to parse MM-DD-YY date format
-const parseTransactionDate = (dateString: string): Date => {
-  const parts = dateString.split('-');
-  if (parts.length === 3) {
-    const month = parseInt(parts[0]) - 1; // Month is 0-indexed
-    const day = parseInt(parts[1]);
-    const year = parseInt(parts[2]) + 2000; // Convert YY to YYYY
-    return new Date(year, month, day);
-  }
-  return new Date(dateString); // Fallback to default parsing
-};
 
 export default function FinancesScreen() {
   const { properties, transactions, isLoading, exportTransactionsToExcel } = usePortfolio();

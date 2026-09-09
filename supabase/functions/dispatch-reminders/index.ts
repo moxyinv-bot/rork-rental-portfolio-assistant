@@ -17,8 +17,7 @@ type ExistingDeliveryRow = {
 };
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Content-Type": "application/json",
 };
 
 const parseReminderDate = (value: string): Date => {
@@ -124,12 +123,30 @@ const sendEmail = async (to: string, subject: string, text: string): Promise<{ o
 };
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: corsHeaders,
+    });
   }
 
   try {
-    const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const cronSecret = Deno.env.get("REMINDER_CRON_SECRET");
+    if (!cronSecret) {
+      return new Response(JSON.stringify({ error: "Reminder scheduler is not configured" }), {
+        status: 503,
+        headers: corsHeaders,
+      });
+    }
+
+    if (req.headers.get("x-reminder-cron-secret") !== cronSecret) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: corsHeaders,
+      });
+    }
+
+    const body = await req.json().catch(() => ({}));
     const dryRun = body?.dryRun ?? true;
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");

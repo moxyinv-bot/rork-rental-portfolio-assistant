@@ -16,9 +16,11 @@ import { router } from "expo-router";
 import { usePortfolio } from "@/hooks/portfolio-store";
 import { Receipt } from "@/types/property";
 import * as ImagePicker from "expo-image-picker";
-import { Camera, Tag, FileText, ChevronDown, Calendar } from "lucide-react-native";
+import { Camera, Tag, FileText, ChevronDown, Calendar, Upload } from "lucide-react-native";
+import * as DocumentPicker from 'expo-document-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from "react-native-safe-area-context";
+import { toStoredDate, formatDisplayDate } from "@/lib/dates";
 
 export default function AddReceiptScreen() {
   const { properties, addReceipt } = usePortfolio();
@@ -27,12 +29,7 @@ export default function AddReceiptScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
   
-  const formatDate = (date: Date) => {
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    const year = date.getFullYear().toString().slice(-2);
-    return `${month}-${day}-${year}`;
-  };
+  const formatDate = toStoredDate;
   
   const [formData, setFormData] = useState({
     propertyId: "",
@@ -109,6 +106,22 @@ export default function AddReceiptScreen() {
     return properties.find(p => p.id === formData.propertyId);
   };
 
+  const pickDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/*', 'text/*', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+      setFormData({ ...formData, uri: result.assets[0].uri });
+    } catch (error) {
+      console.error('Error picking document:', error);
+      Alert.alert('Upload failed', 'Please try again or choose a different file.');
+    }
+  };
+
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
@@ -137,7 +150,8 @@ export default function AddReceiptScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["bottom"]}>
     <KeyboardAvoidingView 
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior="padding"
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 64}
       style={{ flex: 1 }}
     >
       <ScrollView 
@@ -165,6 +179,10 @@ export default function AddReceiptScreen() {
                 <TouchableOpacity style={styles.imageButton} onPress={pickImage}>
                   <FileText size={24} color="#6B7280" />
                   <Text style={styles.imageButtonText}>Choose from Library</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.imageButton} onPress={pickDocument}>
+                  <Upload size={24} color="#6B7280" />
+                  <Text style={styles.imageButtonText}>Upload Document</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -223,7 +241,7 @@ export default function AddReceiptScreen() {
               onPress={() => setShowDatePicker(true)}
             >
               <Calendar size={20} color="#6B7280" />
-              <Text style={styles.dateButtonText}>{formData.date}</Text>
+              <Text style={styles.dateButtonText}>{formatDisplayDate(formData.date)}</Text>
             </TouchableOpacity>
           </View>
 

@@ -12,12 +12,13 @@ import {
   Modal,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
-import { usePortfolio } from "@/hooks/portfolio-store";
+import { usePortfolio, parseTransactionDate } from "@/hooks/portfolio-store";
 import { Transaction } from "@/types/property";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@/constants/categories";
 import { DollarSign, Tag, ChevronDown, Trash2, Calendar } from "lucide-react-native";
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from "react-native-safe-area-context";
+import { toStoredDate, formatDisplayDate } from "@/lib/dates";
 
 export default function EditTransactionScreen() {
   const { id } = useLocalSearchParams();
@@ -29,23 +30,7 @@ export default function EditTransactionScreen() {
   
   const transaction = transactions.find(t => t.id === id);
   
-  const formatDate = (date: Date) => {
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    const year = date.getFullYear().toString().slice(-2);
-    return `${month}-${day}-${year}`;
-  };
-  
-  const parseDate = (dateString: string) => {
-    const parts = dateString.split('-');
-    if (parts.length === 3) {
-      const month = parseInt(parts[0]) - 1;
-      const day = parseInt(parts[1]);
-      const year = parseInt(parts[2]) + 2000;
-      return new Date(year, month, day);
-    }
-    return new Date();
-  };
+  const formatDate = toStoredDate;
   
   const [formData, setFormData] = useState({
     propertyId: "",
@@ -59,14 +44,14 @@ export default function EditTransactionScreen() {
 
   useEffect(() => {
     if (transaction) {
-      const parsedDate = parseDate(transaction.date);
+      const parsedDate = parseTransactionDate(transaction.date);
       setSelectedDate(parsedDate);
       setFormData({
         propertyId: transaction.propertyId,
         type: transaction.type,
         category: transaction.category,
         amount: transaction.amount.toString(),
-        date: transaction.date,
+        date: formatDate(parsedDate),
         description: transaction.description,
         tags: transaction.tags.join(", "),
       });
@@ -174,7 +159,8 @@ export default function EditTransactionScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["bottom"]}>
     <KeyboardAvoidingView 
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior="padding"
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 64}
       style={{ flex: 1 }}
     >
       <ScrollView 
@@ -277,7 +263,7 @@ export default function EditTransactionScreen() {
               onPress={() => setShowDatePicker(true)}
             >
               <Calendar size={20} color="#6B7280" />
-              <Text style={styles.dateButtonText}>{formData.date}</Text>
+              <Text style={styles.dateButtonText}>{formatDisplayDate(formData.date)}</Text>
             </TouchableOpacity>
           </View>
 

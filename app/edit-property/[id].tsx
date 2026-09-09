@@ -12,26 +12,46 @@ import {
   Keyboard,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
-import { usePortfolio } from "@/hooks/portfolio-store";
-import { Property } from "@/types/property";
-import { PROPERTY_TYPES } from "@/constants/categories";
+import { usePortfolio, parseTransactionDate } from "@/hooks/portfolio-store";
+import { CustomPropertyField, Property } from "@/types/property";
+import { PROPERTY_TYPES, PROPERTY_BACKGROUND_COLORS } from "@/constants/categories";
 import * as ImagePicker from "expo-image-picker";
-import { Camera } from "lucide-react-native";
+import { Camera, Calendar, Plus, Trash2 } from "lucide-react-native";
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from "react-native-safe-area-context";
+import { toStoredDate, formatDisplayDate } from "@/lib/dates";
+
+const MAX_CUSTOM_FIELDS = 10;
+
+const createCustomField = (): CustomPropertyField => ({
+  id: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+  label: "",
+  value: "",
+});
+
+const cleanCustomFields = (fields: CustomPropertyField[]): CustomPropertyField[] =>
+  fields
+    .map(field => ({ ...field, label: field.label.trim(), value: field.value.trim() }))
+    .filter(field => field.label && field.value)
+    .slice(0, MAX_CUSTOM_FIELDS);
 
 export default function EditPropertyScreen() {
   const { id } = useLocalSearchParams();
   const { properties, updateProperty } = usePortfolio();
   const [isSaving, setIsSaving] = useState(false);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
-  
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+
+  const formatDate = toStoredDate;
+
   const property = properties.find(p => p.id === id);
   
   const [formData, setFormData] = useState({
     name: "",
     address: "",
     type: "single-family" as Property["type"],
-    purchaseDate: new Date().toISOString().split('T')[0],
+    purchaseDate: formatDate(new Date()),
     purchasePrice: "",
     currentValue: "",
     monthlyRent: "",
@@ -55,6 +75,8 @@ export default function EditPropertyScreen() {
     applianceInfo: "",
     notes: "",
     imageUri: "",
+    backgroundColor: PROPERTY_BACKGROUND_COLORS[0].value,
+    customFields: [] as CustomPropertyField[],
   });
 
   React.useEffect(() => {
@@ -74,11 +96,13 @@ export default function EditPropertyScreen() {
   // Load property data when component mounts
   useEffect(() => {
     if (property) {
+      const parsedPurchaseDate = property.purchaseDate ? parseTransactionDate(property.purchaseDate) : new Date();
+      setSelectedDate(parsedPurchaseDate);
       setFormData({
         name: property.name || "",
         address: property.address || "",
         type: property.type,
-        purchaseDate: property.purchaseDate || new Date().toISOString().split('T')[0],
+        purchaseDate: property.purchaseDate ? formatDate(parsedPurchaseDate) : formatDate(new Date()),
         purchasePrice: property.purchasePrice?.toString() || "",
         currentValue: property.currentValue?.toString() || "",
         monthlyRent: property.monthlyRent?.toString() || "",
@@ -102,6 +126,8 @@ export default function EditPropertyScreen() {
         applianceInfo: property.applianceInfo || "",
         notes: property.notes || "",
         imageUri: property.imageUri || "",
+        backgroundColor: property.backgroundColor || PROPERTY_BACKGROUND_COLORS[0].value,
+        customFields: property.customFields || [],
       });
     }
   }, [property]);
@@ -176,6 +202,8 @@ export default function EditPropertyScreen() {
         applianceInfo: formData.applianceInfo || undefined,
         notes: formData.notes || undefined,
         imageUri: formData.imageUri || undefined,
+        backgroundColor: formData.backgroundColor || undefined,
+        customFields: cleanCustomFields(formData.customFields),
       };
 
       console.log('Updating property:', updatedProperty);
@@ -204,11 +232,27 @@ export default function EditPropertyScreen() {
     }
   };
 
+  const addCustomField = () => {
+    if (formData.customFields.length >= MAX_CUSTOM_FIELDS) return;
+    setFormData({ ...formData, customFields: [...formData.customFields, createCustomField()] });
+  };
+
+  const updateCustomField = (fieldId: string, updates: Partial<CustomPropertyField>) => {
+    setFormData({
+      ...formData,
+      customFields: formData.customFields.map(field => field.id === fieldId ? { ...field, ...updates } : field),
+    });
+  };
+
+  const removeCustomField = (fieldId: string) => {
+    setFormData({ ...formData, customFields: formData.customFields.filter(field => field.id !== fieldId) });
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={["bottom"]}>
     <KeyboardAvoidingView 
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 24}
+      behavior="padding"
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 96}
       style={{ flex: 1 }}
     >
       <ScrollView 
@@ -234,6 +278,7 @@ export default function EditPropertyScreen() {
               value={formData.name}
               onChangeText={(text) => setFormData({ ...formData, name: text })}
               placeholder="e.g., Main Street Apartment"
+              placeholderTextColor="#6B7280"
             />
             
             <Text style={styles.label}>Address *</Text>
@@ -242,6 +287,7 @@ export default function EditPropertyScreen() {
               value={formData.address}
               onChangeText={(text) => setFormData({ ...formData, address: text })}
               placeholder="123 Main St, City, State ZIP"
+              placeholderTextColor="#6B7280"
               multiline
             />
             
@@ -265,6 +311,29 @@ export default function EditPropertyScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+
+            <Text style={styles.label}>Dashboard Color</Text>
+            <View style={styles.colorGrid}>
+              {PROPERTY_BACKGROUND_COLORS.map(color => (
+                <TouchableOpacity
+                  key={color.value}
+                  style={[
+                    styles.colorOption,
+                    { backgroundColor: color.value },
+                    formData.backgroundColor === color.value && styles.colorOptionActive
+                  ]}
+                  onPress={() => setFormData({ ...formData, backgroundColor: color.value })}
+                  accessibilityLabel={color.label}
+                >
+                  {formData.backgroundColor === color.value && (
+                    <View style={styles.checkmark}>
+                      <Text style={styles.checkmarkText}>✓</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.colorNote}>Select a color for the property button on the dashboard</Text>
           </View>
 
           {/* Financial Information */}
@@ -283,6 +352,15 @@ export default function EditPropertyScreen() {
               placeholder="150000"
               keyboardType="decimal-pad"
             />
+
+            <Text style={styles.label}>Purchase Date</Text>
+            <TouchableOpacity
+              style={styles.dateButton}
+              onPress={() => setShowDatePicker(true)}
+            >
+              <Calendar size={20} color="#6B7280" />
+              <Text style={styles.dateButtonText}>{formatDisplayDate(formData.purchaseDate)}</Text>
+            </TouchableOpacity>
             
             <Text style={styles.label}>Current Value</Text>
             <TextInput
@@ -501,6 +579,46 @@ export default function EditPropertyScreen() {
               multiline
               numberOfLines={4}
             />
+
+            <View style={styles.customFieldsHeader}>
+              <View>
+                <Text style={styles.label}>Custom Rows</Text>
+                <Text style={styles.customFieldsCount}>{formData.customFields.length}/{MAX_CUSTOM_FIELDS}</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.addCustomFieldButton, formData.customFields.length >= MAX_CUSTOM_FIELDS && styles.addCustomFieldButtonDisabled]}
+                onPress={addCustomField}
+                disabled={formData.customFields.length >= MAX_CUSTOM_FIELDS}
+              >
+                <Plus size={16} color="#FFFFFF" />
+                <Text style={styles.addCustomFieldButtonText}>Add Row</Text>
+              </TouchableOpacity>
+            </View>
+
+            {formData.customFields.map((field, index) => (
+              <View key={field.id} style={styles.customFieldRow}>
+                <View style={styles.customFieldInputs}>
+                  <TextInput
+                    style={styles.input}
+                    value={field.label}
+                    onChangeText={(text) => updateCustomField(field.id, { label: text })}
+                    placeholder={`Label ${index + 1}`}
+                    placeholderTextColor="#6B7280"
+                  />
+                  <TextInput
+                    style={[styles.input, styles.customFieldValueInput]}
+                    value={field.value}
+                    onChangeText={(text) => updateCustomField(field.id, { value: text })}
+                    placeholder="Value"
+                    placeholderTextColor="#6B7280"
+                    multiline
+                  />
+                </View>
+                <TouchableOpacity style={styles.removeCustomFieldButton} onPress={() => removeCustomField(field.id)}>
+                  <Trash2 size={18} color="#EF4444" />
+                </TouchableOpacity>
+              </View>
+            ))}
           </View>
 
           {/* Notes */}
@@ -527,6 +645,21 @@ export default function EditPropertyScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {showDatePicker && (
+        <DateTimePicker
+          value={selectedDate}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={(event, date) => {
+            setShowDatePicker(Platform.OS === 'ios');
+            if (date) {
+              setSelectedDate(date);
+              setFormData({ ...formData, purchaseDate: formatDate(date) });
+            }
+          }}
+        />
+      )}
     </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -567,6 +700,7 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: "#FFFFFF",
+    color: "#111827",
     borderWidth: 1,
     borderColor: "#D1D5DB",
     borderRadius: 8,
@@ -577,6 +711,21 @@ const styles = StyleSheet.create({
   textArea: {
     minHeight: 100,
     textAlignVertical: "top",
+  },
+  dateButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  dateButtonText: {
+    fontSize: 16,
+    color: "#111827",
   },
   imageButton: {
     flexDirection: "row",
@@ -654,5 +803,95 @@ const styles = StyleSheet.create({
     borderColor: "#FCD34D",
     borderWidth: 2,
     backgroundColor: "#FFFBEB",
+  },
+  colorGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+    marginBottom: 8,
+  },
+  colorOption: {
+    width: "30%",
+    aspectRatio: 1,
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  colorOptionActive: {
+    borderColor: "#FFFFFF",
+    borderWidth: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  checkmark: {
+    backgroundColor: "rgba(0, 0, 0, 0.2)",
+    borderRadius: 20,
+    width: 32,
+    height: 32,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  checkmarkText: {
+    color: "#FFFFFF",
+    fontSize: 20,
+    fontWeight: "700" as const,
+  },
+  colorNote: {
+    fontSize: 12,
+    color: "#6B7280",
+    fontStyle: "italic" as const,
+  },
+  customFieldsHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  customFieldsCount: {
+    fontSize: 12,
+    color: "#6B7280",
+  },
+  addCustomFieldButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#3B82F6",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    gap: 6,
+  },
+  addCustomFieldButtonDisabled: {
+    backgroundColor: "#9CA3AF",
+  },
+  addCustomFieldButtonText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "600" as const,
+  },
+  customFieldRow: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "flex-start",
+    marginBottom: 4,
+  },
+  customFieldInputs: {
+    flex: 1,
+  },
+  customFieldValueInput: {
+    minHeight: 72,
+    textAlignVertical: "top",
+  },
+  removeCustomFieldButton: {
+    backgroundColor: "#FEF2F2",
+    borderWidth: 1,
+    borderColor: "#FECACA",
+    borderRadius: 8,
+    padding: 10,
   },
 });

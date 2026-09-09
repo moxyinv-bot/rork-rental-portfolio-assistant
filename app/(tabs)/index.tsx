@@ -1,5 +1,8 @@
-import React from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import {
+  Alert,
+  Modal,
+  PanResponder,
   StyleSheet,
   Text,
   View,
@@ -8,12 +11,114 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { router } from "expo-router";
-import { Plus, TrendingUp, TrendingDown, Home, AlertCircle, DollarSign } from "lucide-react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Plus, TrendingUp, TrendingDown, Home, AlertCircle, DollarSign, ArrowDownUp, Check, GripVertical, X } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { usePortfolio } from "@/hooks/portfolio-store";
+import { useHousehold } from "@/hooks/useHousehold";
+
+type PropertySortOption = "custom" | "name" | "purchase-date" | "rent-desc";
+
+const PROPERTY_SORT_OPTIONS: { value: PropertySortOption; label: string }[] = [
+  { value: "custom", label: "Custom order" },
+  { value: "name", label: "A-Z" },
+  { value: "purchase-date", label: "Purchase date" },
+  { value: "rent-desc", label: "Rent: high to low" },
+];
+
+const getPropertySortStorageKey = (householdId?: string | null) => (
+  householdId ? `portfolio_property_sort_option:${householdId}` : "portfolio_property_sort_option"
+);
+
+const customOrderComparator = (left: { displayOrder?: number; name: string }, right: { displayOrder?: number; name: string }) => {
+  const leftOrder = left.displayOrder ?? Number.MAX_SAFE_INTEGER;
+  const rightOrder = right.displayOrder ?? Number.MAX_SAFE_INTEGER;
+  return leftOrder === rightOrder ? left.name.localeCompare(right.name) : leftOrder - rightOrder;
+};
 
 export default function DashboardScreen() {
-  const { properties, portfolioMetrics, upcomingReminders, isLoading } = usePortfolio();
+  const { household } = useHousehold();
+  const { properties, portfolioMetrics, upcomingReminders, reorderProperties, isLoading } = usePortfolio();
+  const [sortOption, setSortOption] = useState<PropertySortOption>("custom");
+  const [showSortModal, setShowSortModal] = useState(false);
+  const [showReorderModal, setShowReorderModal] = useState(false);
+  const [customOrderIds, setCustomOrderIds] = useState<string[]>([]);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const hydrateSortOption = async () => {
+      const storageKey = getPropertySortStorageKey(household?.id);
+      try {
+        const savedValue = await AsyncStorage.getItem(storageKey);
+        if (!isMounted) return;
+
+        if (savedValue && PROPERTY_SORT_OPTIONS.some(option => option.value === savedValue)) {
+          setSortOption(savedValue as PropertySortOption);
+          return;
+        }
+
+        setSortOption("custom");
+      } catch (error) {
+        console.error("Error loading saved property sort option:", error);
+        if (isMounted) setSortOption("custom");
+      }
+    };
+
+    hydrateSortOption();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [household?.id]);
+
+  useEffect(() => {
+    const storageKey = getPropertySortStorageKey(household?.id);
+    AsyncStorage.setItem(storageKey, sortOption).catch(error => {
+      console.error("Error saving property sort option:", error);
+    });
+  }, [household?.id, sortOption]);
+
+  const sortedProperties = useMemo(() => {
+    const sorted = [...properties];
+    if (sortOption === "name") return sorted.sort((left, right) => left.name.localeCompare(right.name));
+    if (sortOption === "purchase-date") return sorted.sort((left, right) => new Date(right.purchaseDate || 0).getTime() - new Date(left.purchaseDate || 0).getTime());
+    if (sortOption === "rent-desc") return sorted.sort((left, right) => right.monthlyRent - left.monthlyRent);
+    return sorted.sort(customOrderComparator);
+  }, [properties, sortOption]);
+
+  const openCustomOrder = () => {
+    setCustomOrderIds([...properties].sort(customOrderComparator).map(property => property.id));
+    setShowSortModal(false);
+    setShowReorderModal(true);
+  };
+
+  const moveCustomProperty = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || toIndex < 0 || toIndex >= customOrderIds.length) return;
+    setCustomOrderIds(previous => {
+      const next = [...previous];
+      const [movedId] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, movedId);
+      return next;
+    });
+  };
+
+  const saveCustomOrder = async () => {
+    if (isSavingOrder) return;
+    try {
+      setIsSavingOrder(true);
+      await reorderProperties(customOrderIds);
+      setSortOption("custom");
+      setShowReorderModal(false);
+    } catch (error) {
+      console.error("Error saving property order:", error);
+      Alert.alert("Could not save order", "Please try again.");
+    } finally {
+      setIsSavingOrder(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -153,13 +258,19 @@ export default function DashboardScreen() {
       <View style={styles.propertiesSection}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Properties</Text>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => router.push('/add-property' as any)}
-          >
-            <Plus size={20} color="#FFFFFF" />
-            <Text style={styles.addButtonText}>Add</Text>
-          </TouchableOpacity>
+          <View style={styles.propertyActions}>
+            <TouchableOpacity style={styles.sortButton} onPress={() => setShowSortModal(true)}>
+              <ArrowDownUp size={17} color="#3B82F6" />
+              <Text style={styles.sortButtonText}>Sort</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => router.push('/add-property' as any)}
+            >
+              <Plus size={20} color="#FFFFFF" />
+              <Text style={styles.addButtonText}>Add</Text>
+            </TouchableOpacity>
+          </View>
         </View>
         
         {properties.length === 0 ? (
@@ -174,21 +285,49 @@ export default function DashboardScreen() {
             </TouchableOpacity>
           </View>
         ) : (
-          properties.map((property) => (
+          sortedProperties.map((property) => (
             <TouchableOpacity
               key={property.id}
-              style={styles.propertyCard}
+              style={[
+                styles.propertyCard,
+                { backgroundColor: property.backgroundColor || "#0369A1" }
+              ]}
               onPress={() => router.push(`/property/${property.id}` as any)}
             >
               <View style={styles.propertyHeader}>
-                <Text style={styles.propertyName}>{property.name}</Text>
-                <Text style={styles.propertyRent}>{formatCurrency(property.monthlyRent)}/mo</Text>
+                <Text style={[
+                  styles.propertyName,
+                  { color: "#FFFFFF" }
+                ]}>
+                  {property.name}
+                </Text>
+                <Text style={[
+                  styles.propertyRent,
+                  { color: "#FFFFFF" }
+                ]}>
+                  {formatCurrency(property.monthlyRent)}/mo
+                </Text>
               </View>
-              <Text style={styles.propertyAddress}>{property.address}</Text>
+              <Text style={[
+                styles.propertyAddress,
+                { color: "#F0F0F0" }
+              ]}>
+                {property.address}
+              </Text>
               <View style={styles.propertyFooter}>
-                <Text style={styles.propertyType}>{property.type}</Text>
+                <Text style={[
+                  styles.propertyType,
+                  { color: "#E0E0E0" }
+                ]}>
+                  {property.type}
+                </Text>
                 {!!property.tenantName && (
-                  <Text style={styles.propertyTenant}>Tenant: {property.tenantName}</Text>
+                  <Text style={[
+                    styles.propertyTenant,
+                    { color: "#E0E0E0" }
+                  ]}>
+                    Tenant: {property.tenantName}
+                  </Text>
                 )}
               </View>
             </TouchableOpacity>
@@ -196,6 +335,85 @@ export default function DashboardScreen() {
         )}
       </View>
     </ScrollView>
+
+    <Modal visible={showSortModal} animationType="fade" transparent onRequestClose={() => setShowSortModal(false)}>
+      <SafeAreaView style={styles.modalOverlay} edges={["bottom"]}>
+        <TouchableOpacity style={styles.modalDismissArea} activeOpacity={1} onPress={() => setShowSortModal(false)}>
+          <View style={styles.sortModal} onStartShouldSetResponder={() => true}>
+            <View style={styles.sortModalHeader}>
+              <Text style={styles.sortModalTitle}>Sort Properties</Text>
+              <TouchableOpacity onPress={() => setShowSortModal(false)}>
+                <X size={22} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+            {PROPERTY_SORT_OPTIONS.map(option => (
+              <TouchableOpacity
+                key={option.value}
+                style={styles.sortOption}
+                onPress={() => {
+                  if (option.value === "custom") {
+                    openCustomOrder();
+                    return;
+                  }
+                  setSortOption(option.value);
+                  setShowSortModal(false);
+                }}
+              >
+                <Text style={[styles.sortOptionText, sortOption === option.value && styles.sortOptionTextActive]}>{option.label}</Text>
+                {sortOption === option.value ? <Check size={20} color="#2563EB" /> : null}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </SafeAreaView>
+    </Modal>
+
+    <Modal visible={showReorderModal} animationType="slide" onRequestClose={() => setShowReorderModal(false)}>
+      <SafeAreaView style={styles.reorderContainer} edges={["top", "bottom"]}>
+        <View style={styles.reorderHeader}>
+          <TouchableOpacity onPress={() => setShowReorderModal(false)} disabled={isSavingOrder}>
+            <X size={24} color="#6B7280" />
+          </TouchableOpacity>
+          <View style={styles.reorderTitleContainer}>
+            <Text style={styles.reorderTitle}>Custom Order</Text>
+            <Text style={styles.reorderSubtitle}>Drag a row up or down, then save your order.</Text>
+          </View>
+          <View style={styles.reorderHeaderSpacer} />
+        </View>
+        <ScrollView contentContainerStyle={styles.reorderList} showsVerticalScrollIndicator={false}>
+          {customOrderIds.map((propertyId, index) => {
+            const property = properties.find(item => item.id === propertyId);
+            if (!property) return null;
+            const panResponder = PanResponder.create({
+              onStartShouldSetPanResponder: () => true,
+              onMoveShouldSetPanResponder: (_event, gestureState) => Math.abs(gestureState.dy) > 4,
+              onPanResponderGrant: () => setDraggedIndex(index),
+              onPanResponderRelease: (_event, gestureState) => {
+                setDraggedIndex(null);
+                const targetIndex = Math.max(0, Math.min(customOrderIds.length - 1, index + Math.round(gestureState.dy / 64)));
+                moveCustomProperty(index, targetIndex);
+              },
+              onPanResponderTerminate: () => setDraggedIndex(null),
+            });
+
+            return (
+              <View key={property.id} {...panResponder.panHandlers} style={[styles.reorderRow, draggedIndex === index && styles.reorderRowDragging]}>
+                <GripVertical size={22} color="#64748B" />
+                <View style={styles.reorderRowInfo}>
+                  <Text style={styles.reorderRowName}>{property.name}</Text>
+                  <Text style={styles.reorderRowAddress} numberOfLines={1}>{property.address}</Text>
+                </View>
+              </View>
+            );
+          })}
+        </ScrollView>
+        <View style={styles.reorderFooter}>
+          <TouchableOpacity style={styles.reorderSaveButton} onPress={saveCustomOrder} disabled={isSavingOrder}>
+            <Text style={styles.reorderSaveText}>{isSavingOrder ? "Saving..." : "Save Custom Order"}</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    </Modal>
     </SafeAreaView>
   );
 }
@@ -346,6 +564,27 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingTop: 0,
   },
+  propertyActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  sortButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+    gap: 5,
+  },
+  sortButtonText: {
+    color: "#2563EB",
+    fontSize: 13,
+    fontWeight: "600" as const,
+  },
   addButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -370,6 +609,129 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 2,
     elevation: 2,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(17, 24, 39, 0.45)",
+  },
+  modalDismissArea: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  sortModal: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    padding: 16,
+    paddingBottom: 28,
+  },
+  sortModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  sortModalTitle: {
+    color: "#111827",
+    fontSize: 18,
+    fontWeight: "700" as const,
+  },
+  sortOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+  },
+  sortOptionText: {
+    color: "#374151",
+    fontSize: 16,
+  },
+  sortOptionTextActive: {
+    color: "#2563EB",
+    fontWeight: "700" as const,
+  },
+  reorderContainer: {
+    flex: 1,
+    backgroundColor: "#F9FAFB",
+  },
+  reorderHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E5E7EB",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  reorderTitleContainer: {
+    flex: 1,
+    marginHorizontal: 14,
+  },
+  reorderTitle: {
+    color: "#111827",
+    fontSize: 18,
+    fontWeight: "700" as const,
+  },
+  reorderSubtitle: {
+    color: "#6B7280",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  reorderHeaderSpacer: {
+    width: 24,
+  },
+  reorderList: {
+    padding: 16,
+    paddingBottom: 100,
+    gap: 8,
+  },
+  reorderRow: {
+    minHeight: 64,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    gap: 10,
+  },
+  reorderRowDragging: {
+    backgroundColor: "#EFF6FF",
+    borderColor: "#3B82F6",
+    opacity: 0.8,
+  },
+  reorderRowInfo: {
+    flex: 1,
+  },
+  reorderRowName: {
+    color: "#111827",
+    fontSize: 16,
+    fontWeight: "600" as const,
+  },
+  reorderRowAddress: {
+    color: "#6B7280",
+    fontSize: 13,
+    marginTop: 2,
+  },
+  reorderFooter: {
+    padding: 16,
+    backgroundColor: "#FFFFFF",
+    borderTopWidth: 1,
+    borderTopColor: "#E5E7EB",
+  },
+  reorderSaveButton: {
+    backgroundColor: "#3B82F6",
+    alignItems: "center",
+    borderRadius: 8,
+    paddingVertical: 14,
+  },
+  reorderSaveText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700" as const,
   },
   propertyHeader: {
     flexDirection: "row",

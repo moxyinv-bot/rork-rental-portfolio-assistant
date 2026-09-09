@@ -1,12 +1,13 @@
 {
   "name": "expo-app",
   "main": "expo-router/entry",
-  "version": "1.0.0",
+  "version": "1.0.5",
   "scripts": {
     "start": "bunx rork start -p 7qnyyg8myr2908b1ajb2f",
     "start-web": "bunx rork start -p 7qnyyg8myr2908b1ajb2f --web",
     "start-web-dev": "DEBUG=expo* bunx rork start -p 7qnyyg8myr2908b1ajb2f --web",
     "lint": "expo lint",
+    "bump:android": "node scripts/bump-android-version.js",
     "android": "expo run:android",
     "ios": "expo run:ios"
   },
@@ -24,6 +25,7 @@
     "expo-calendar": "~15.0.8",
     "expo-constants": "~18.0.14",
     "expo-crypto": "~15.0.9",
+    "expo-document-picker": "~14.0.8",
     "expo-file-system": "~19.0.24",
     "expo-font": "~14.0.12",
     "expo-image-manipulator": "~14.0.8",

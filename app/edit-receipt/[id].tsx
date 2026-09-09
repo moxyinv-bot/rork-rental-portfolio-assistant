@@ -13,12 +13,13 @@ import {
   Modal,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
-import { usePortfolio } from "@/hooks/portfolio-store";
+import { usePortfolio, parseTransactionDate } from "@/hooks/portfolio-store";
 import { Receipt } from "@/types/property";
 import * as ImagePicker from "expo-image-picker";
 import { Camera, Tag, FileText, ChevronDown, Trash2, Calendar } from "lucide-react-native";
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from "react-native-safe-area-context";
+import { toStoredDate, formatDisplayDate } from "@/lib/dates";
 
 export default function EditReceiptScreen() {
   const { id } = useLocalSearchParams();
@@ -30,23 +31,7 @@ export default function EditReceiptScreen() {
   
   const receipt = receipts.find(r => r.id === id);
   
-  const formatDate = (date: Date) => {
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    const year = date.getFullYear().toString().slice(-2);
-    return `${month}-${day}-${year}`;
-  };
-  
-  const parseDate = (dateString: string) => {
-    const parts = dateString.split('-');
-    if (parts.length === 3) {
-      const month = parseInt(parts[0]) - 1;
-      const day = parseInt(parts[1]);
-      const year = parseInt(parts[2]) + 2000;
-      return new Date(year, month, day);
-    }
-    return new Date();
-  };
+  const formatDate = toStoredDate;
   
   const [formData, setFormData] = useState({
     propertyId: "",
@@ -61,12 +46,12 @@ export default function EditReceiptScreen() {
 
   useEffect(() => {
     if (receipt) {
-      const parsedDate = parseDate(receipt.date);
+      const parsedDate = parseTransactionDate(receipt.date);
       setSelectedDate(parsedDate);
       setFormData({
         propertyId: receipt.propertyId,
         uri: receipt.uri,
-        date: receipt.date,
+        date: formatDate(parsedDate),
         amount: receipt.amount?.toString() || "",
         vendor: receipt.vendor || "",
         category: receipt.category || "",
@@ -199,7 +184,8 @@ export default function EditReceiptScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["bottom"]}>
     <KeyboardAvoidingView 
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior="padding"
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 64}
       style={{ flex: 1 }}
     >
       <ScrollView 
@@ -281,7 +267,7 @@ export default function EditReceiptScreen() {
               onPress={() => setShowDatePicker(true)}
             >
               <Calendar size={20} color="#6B7280" />
-              <Text style={styles.dateButtonText}>{formData.date}</Text>
+              <Text style={styles.dateButtonText}>{formatDisplayDate(formData.date)}</Text>
             </TouchableOpacity>
           </View>
 

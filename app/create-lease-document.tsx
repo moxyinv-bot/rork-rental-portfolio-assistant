@@ -7,7 +7,8 @@ import {
   TouchableOpacity,
   TextInput,
   Alert,
-  Platform
+  Platform,
+  KeyboardAvoidingView
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Stack, router } from 'expo-router';
@@ -20,8 +21,10 @@ import {
   Tag,
   Type,
   Check,
-  X
+  X,
+  Upload
 } from 'lucide-react-native';
+import * as DocumentPicker from 'expo-document-picker';
 import { usePortfolio } from '@/hooks/portfolio-store';
 import { LeaseDocument, LeaseFolder } from '@/types/property';
 
@@ -51,6 +54,7 @@ export default function CreateLeaseDocumentScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [tags, setTags] = useState('');
   const [notes, setNotes] = useState('');
+  const [uploadedDocumentUri, setUploadedDocumentUri] = useState<string>('');
 
   const availableFolders = selectedProperty 
     ? leaseFolders.filter(f => f.propertyId === selectedProperty)
@@ -123,6 +127,7 @@ export default function CreateLeaseDocumentScreen() {
         type: documentType,
         title: title.trim(),
         content: content.trim(),
+        originalImageUri: uploadedDocumentUri || undefined,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         tags: tags.split(',').map(tag => tag.trim()).filter(tag => tag),
@@ -153,6 +158,25 @@ export default function CreateLeaseDocumentScreen() {
     }
   };
 
+  const handleUploadDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/*', 'text/*', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+
+      const uri = result.assets[0].uri;
+      setUploadedDocumentUri(uri);
+      Alert.alert('Document selected', 'The file has been attached to this lease document.');
+    } catch (error) {
+      console.error('Error picking document:', error);
+      Alert.alert('Upload failed', 'Please try again or choose a different file.');
+    }
+  };
+
   const canSave = title.trim() && content.trim() && selectedProperty && selectedFolder;
 
   return (
@@ -180,10 +204,16 @@ export default function CreateLeaseDocumentScreen() {
         }} 
       />
 
+      <KeyboardAvoidingView
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 64}
+        style={{ flex: 1 }}
+      >
       <ScrollView 
         style={styles.content} 
         contentContainerStyle={{ paddingBottom: 16 }}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         <View style={styles.formSection}>
           <Text style={styles.sectionTitle}>Document Details</Text>
@@ -200,6 +230,21 @@ export default function CreateLeaseDocumentScreen() {
               placeholder="Enter document title"
               testID="title-input"
             />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <View style={styles.inputLabelRow}>
+              <Upload size={16} color="#6B7280" />
+              <Text style={styles.inputLabel}>Document Upload</Text>
+            </View>
+            <TouchableOpacity style={styles.uploadButton} onPress={handleUploadDocument}>
+              <Text style={styles.uploadButtonText}>
+                {uploadedDocumentUri ? 'Replace Uploaded File' : 'Upload from Device or Drive'}
+              </Text>
+            </TouchableOpacity>
+            {uploadedDocumentUri ? (
+              <Text style={styles.uploadHint}>Attached: {uploadedDocumentUri.split('/').pop()}</Text>
+            ) : null}
           </View>
 
           <View style={styles.inputGroup}>
@@ -397,6 +442,7 @@ export default function CreateLeaseDocumentScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Date Picker */}
       {showDatePicker && (

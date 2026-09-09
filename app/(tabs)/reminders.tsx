@@ -15,37 +15,9 @@ import { Plus, Calendar, CheckCircle, AlertCircle, Clock, MessageSquare } from "
 import { SafeAreaView } from "react-native-safe-area-context";
 import { usePortfolio } from "@/hooks/portfolio-store";
 import { REMINDER_TYPES } from "@/constants/categories";
+import { parseStoredDate } from "@/lib/dates";
 
-const parseReminderDate = (value: string): Date => {
-  if (!value) return new Date(NaN);
-
-  const normalized = value.replace(/\//g, '-');
-  const parts = normalized.split('-');
-
-  if (parts.length === 3) {
-    const [a, b, c] = parts;
-    const n1 = parseInt(a, 10);
-    const n2 = parseInt(b, 10);
-    const n3 = parseInt(c, 10);
-
-    if (!Number.isNaN(n1) && !Number.isNaN(n2) && !Number.isNaN(n3)) {
-      // MM-DD-YY or MM-DD-YYYY
-      if (a.length <= 2) {
-        const month = n1 - 1;
-        const day = n2;
-        const year = c.length === 2 ? n3 + 2000 : n3;
-        return new Date(year, month, day);
-      }
-
-      // YYYY-MM-DD
-      if (a.length === 4) {
-        return new Date(n1, n2 - 1, n3);
-      }
-    }
-  }
-
-  return new Date(value);
-};
+const parseReminderDate = parseStoredDate;
 
 export default function RemindersScreen() {
   const { properties, reminders, updateReminder, isLoading } = usePortfolio();

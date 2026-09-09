@@ -1,11 +1,12 @@
 import createContextHook from '@nkzw/create-context-hook';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import { Property, Transaction, Receipt, Reminder, LeaseFolder, LeaseDocument, PropertyPhoto, Appliance, PaintColor } from '@/types/property';
+import { Property, Transaction, Receipt, Reminder, LeaseFolder, LeaseDocument, PropertyPhoto, Appliance, PaintColor, CustomPropertyField, PortfolioContact, ContactPhoneNumber, ContactCategory } from '@/types/property';
 import { Platform, Alert } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { supabase } from '@/lib/supabase';
+import { parseStoredDate, normalizeStoredDate } from '@/lib/dates';
 import { useAuth } from '@/hooks/useAuth';
 import { useHousehold } from '@/hooks/useHousehold';
 import {
@@ -38,54 +39,71 @@ const isBucketMissingError = (error: unknown): boolean => {
 
 const getSingleBucketList = (bucketName: string): string[] => [bucketName];
 
-const parseTransactionDate = (dateString: string): Date => {
-  const parts = dateString.split('-');
-  if (parts.length === 3) {
-    const month = parseInt(parts[0]) - 1;
-    const day = parseInt(parts[1]);
-    const year = parseInt(parts[2]) + 2000;
-    return new Date(year, month, day);
-  }
-  return new Date(dateString);
+export const parseTransactionDate = parseStoredDate;
+
+const parseFlexibleDate = parseStoredDate;
+
+const normalizeReminderDueDate = normalizeStoredDate;
+
+const normalizeOptionalDate = (value?: string | null): string | undefined =>
+  value ? normalizeStoredDate(value) : undefined;
+
+const normalizeCustomFields = (value: unknown): CustomPropertyField[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((field, index) => {
+      if (!field || typeof field !== 'object') return null;
+      const record = field as Record<string, unknown>;
+      const label = typeof record.label === 'string' ? record.label.trim() : '';
+      const fieldValue = typeof record.value === 'string' ? record.value.trim() : '';
+      if (!label || !fieldValue) return null;
+
+      return {
+        id: typeof record.id === 'string' && record.id.trim() ? record.id : `custom_${index}`,
+        label,
+        value: fieldValue,
+      };
+    })
+    .filter((field): field is CustomPropertyField => Boolean(field))
+    .slice(0, 10);
 };
 
-const parseFlexibleDate = (value: string): Date => {
-  if (!value) return new Date(NaN);
+const CONTACT_CATEGORIES = new Set<ContactCategory>(['contractor', 'insurance', 'tenant', 'buyer-seller', 'lead', 'other']);
 
-  const normalized = value.replace(/\//g, '-');
-  const parts = normalized.split('-');
-
-  if (parts.length === 3) {
-    const [a, b, c] = parts;
-    const n1 = parseInt(a, 10);
-    const n2 = parseInt(b, 10);
-    const n3 = parseInt(c, 10);
-
-    if (!Number.isNaN(n1) && !Number.isNaN(n2) && !Number.isNaN(n3)) {
-      // MM-DD-YY or MM-DD-YYYY
-      if (a.length <= 2) {
-        const year = c.length === 2 ? n3 + 2000 : n3;
-        return new Date(year, n1 - 1, n2);
-      }
-
-      // YYYY-MM-DD
-      if (a.length === 4) {
-        return new Date(n1, n2 - 1, n3);
-      }
-    }
-  }
-
-  return new Date(value);
+const normalizeContactCategory = (value: unknown): ContactCategory => {
+  return typeof value === 'string' && CONTACT_CATEGORIES.has(value as ContactCategory)
+    ? value as ContactCategory
+    : 'other';
 };
 
-const normalizeReminderDueDate = (value: string): string => {
-  const parsed = parseFlexibleDate(value);
-  if (Number.isNaN(parsed.getTime())) return value;
+const normalizeContactPhoneNumbers = (value: unknown): ContactPhoneNumber[] => {
+  if (!Array.isArray(value)) return [];
 
-  const year = parsed.getFullYear();
-  const month = String(parsed.getMonth() + 1).padStart(2, '0');
-  const day = String(parsed.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return value
+    .map((phone, index) => {
+      if (!phone || typeof phone !== 'object') return null;
+      const record = phone as Record<string, unknown>;
+      const number = typeof record.number === 'string' ? record.number.trim() : '';
+      if (!number) return null;
+
+      return {
+        id: typeof record.id === 'string' && record.id.trim() ? record.id : `phone_${index}`,
+        label: typeof record.label === 'string' && record.label.trim() ? record.label.trim() : 'Phone',
+        number,
+      };
+    })
+    .filter((phone): phone is ContactPhoneNumber => Boolean(phone));
+};
+
+const normalizeTags = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+
+  return Array.from(new Set(
+    value
+      .map(tag => typeof tag === 'string' ? tag.trim() : '')
+      .filter(Boolean)
+  ));
 };
 
 const getMimeTypeFromUri = (uri: string): string => {
@@ -185,6 +203,7 @@ function dbToProperty(row: any): Property {
     purchaseDate: row.purchase_date || '',
     purchasePrice: Number(row.purchase_price) || 0,
     currentValue: row.current_value ? Number(row.current_value) : undefined,
+    squareFootage: row.square_footage ? Number(row.square_footage) : undefined,
     monthlyRent: Number(row.monthly_rent) || 0,
     tenantName: row.tenant_name || undefined,
     tenantContact: row.tenant_contact || undefined,
@@ -208,6 +227,9 @@ function dbToProperty(row: any): Property {
     applianceInfo: row.appliance_info || undefined,
     notes: row.notes || undefined,
     imageUri: row.image_uri || undefined,
+    backgroundColor: row.background_color || undefined,
+    customFields: normalizeCustomFields(row.custom_fields),
+    displayOrder: typeof row.display_order === 'number' ? row.display_order : undefined,
   };
 }
 
@@ -256,11 +278,11 @@ const compactPayload = (payload: Record<string, any>): Record<string, any> => {
 
 const TABLE_COLUMN_ALLOWLIST: Record<string, Set<string>> = {
   properties: new Set([
-    'id', 'household_id', 'user_id', 'name', 'address', 'type', 'purchase_date', 'purchase_price', 'current_value',
+    'id', 'household_id', 'user_id', 'name', 'address', 'type', 'purchase_date', 'purchase_price', 'current_value', 'square_footage',
     'monthly_rent', 'tenant_name', 'tenant_contact', 'lease_start', 'lease_end', 'mortgage_amount', 'mortgage_payment',
     'mortgage_renewal_date', 'insurance_provider', 'insurance_policy', 'insurance_renewal_date', 'insurance_premium',
     'property_tax', 'ac_capacitor_size', 'ac_filter_size', 'paint_colors_inside', 'paint_colors_outside',
-    'water_heater_info', 'appliance_info', 'notes', 'image_uri', 'created_at', 'updated_at'
+    'water_heater_info', 'appliance_info', 'notes', 'image_uri', 'background_color', 'custom_fields', 'display_order', 'created_at', 'updated_at'
   ]),
   transactions: new Set([
     'id', 'user_id', 'household_id', 'property_id', 'type', 'category', 'amount', 'tx_date', 'description', 'receipt_uri', 'tags',
@@ -460,6 +482,22 @@ function dbToPropertyPhoto(row: any): PropertyPhoto {
   };
 }
 
+function dbToContact(row: any): PortfolioContact {
+  return {
+    id: row.id,
+    name: row.name,
+    category: normalizeContactCategory(row.category),
+    phoneNumbers: normalizeContactPhoneNumbers(row.phone_numbers),
+    company: row.company || undefined,
+    email: row.email || undefined,
+    address: row.address || undefined,
+    tags: normalizeTags(row.tags),
+    notes: row.notes || undefined,
+    createdAt: row.created_at || undefined,
+    updatedAt: row.updated_at || undefined,
+  };
+}
+
 export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
   const { user } = useAuth();
   const { household } = useHousehold();
@@ -470,6 +508,7 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
   const [leaseFolders, setLeaseFolders] = useState<LeaseFolder[]>([]);
   const [leaseDocuments, setLeaseDocuments] = useState<LeaseDocument[]>([]);
   const [propertyPhotos, setPropertyPhotos] = useState<PropertyPhoto[]>([]);
+  const [contacts, setContacts] = useState<PortfolioContact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -497,18 +536,34 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
         setLeaseFolders([]);
         setLeaseDocuments([]);
         setPropertyPhotos([]);
+        setContacts([]);
         return;
       }
 
-      const [propsRes, txRes, recRes, remRes, foldersRes, docsRes, photosRes] = await Promise.all([
+      const [propsRes, txRes, recRes, remRes, foldersRes, docsRes, contactsRes] = await Promise.all([
         fetchTableRows('properties', { filterKey: 'household_id', filterValue: normalizedHouseholdId, orderBy: { column: 'created_at', ascending: true } }).catch(() => []),
         fetchTableRows('transactions', { filterKey: 'household_id', filterValue: normalizedHouseholdId, orderBy: { column: 'tx_date', ascending: false } }).catch(() => []),
         fetchTableRows('receipts', { filterKey: 'household_id', filterValue: normalizedHouseholdId, orderBy: { column: 'receipt_date', ascending: false } }).catch(() => []),
         fetchTableRows('reminders', { filterKey: 'household_id', filterValue: normalizedHouseholdId, orderBy: { column: 'due_date', ascending: true } }).catch(() => []),
         fetchTableRows('lease_folders', { filterKey: 'household_id', filterValue: normalizedHouseholdId, orderBy: { column: 'created_at', ascending: true } }).catch(() => []),
         fetchTableRows('lease_documents', { filterKey: 'household_id', filterValue: normalizedHouseholdId, orderBy: { column: 'updated_at', ascending: false } }).catch(() => []),
-        fetchTableRows('property_photos', { filterKey: 'user_id', filterValue: user.id, orderBy: { column: 'created_at', ascending: false } }).catch(() => []),
+        fetchTableRows('household_contacts', { filterKey: 'household_id', filterValue: normalizedHouseholdId, orderBy: { column: 'name', ascending: true } }).catch(() => []),
       ]);
+
+      const householdPropertyIds = propsRes.map((property: any) => property.id).filter(Boolean);
+      let photosRes: any[] = [];
+      if (householdPropertyIds.length > 0) {
+        const { data: photoRows, error: photoError } = await supabase
+          .from('property_photos')
+          .select('*')
+          .in('property_id', householdPropertyIds)
+          .order('created_at', { ascending: false });
+        if (photoError) {
+          console.error('Error loading household property photos:', photoError);
+        } else {
+          photosRes = photoRows ?? [];
+        }
+      }
 
       setProperties(propsRes.map(dbToProperty));
       setTransactions(txRes.map(dbToTransaction));
@@ -516,9 +571,8 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       setReminders(remRes.map(dbToReminder));
       setLeaseFolders(foldersRes.map(dbToLeaseFolder));
       setLeaseDocuments(docsRes.map(dbToLeaseDocument));
-      const householdPropertyIds = new Set(propsRes.map((property: any) => property.id));
-      const filteredPhotos = (photosRes ?? []).filter((photo: any) => householdPropertyIds.has(photo.property_id));
-      setPropertyPhotos(filteredPhotos.map(dbToPropertyPhoto));
+      setPropertyPhotos(photosRes.map(dbToPropertyPhoto));
+      setContacts(contactsRes.map(dbToContact));
     } catch (error) {
       console.error('Error loading portfolio data:', error);
     } finally {
@@ -540,6 +594,7 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
         setLeaseFolders([]);
         setLeaseDocuments([]);
         setPropertyPhotos([]);
+        setContacts([]);
       } else {
         console.log('Household not ready yet; preserving current portfolio state.');
       }
@@ -637,6 +692,18 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
           }
         }
       )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'household_contacts', filter: `household_id=eq.${householdId}` },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const inserted = dbToContact(payload.new);
+            setContacts(prev => prev.some(contact => contact.id === inserted.id) ? prev : [...prev, inserted].sort((a, b) => a.name.localeCompare(b.name)));
+          } else if (payload.eventType === 'UPDATE') {
+            setContacts(prev => prev.map(contact => contact.id === payload.new.id ? dbToContact(payload.new) : contact).sort((a, b) => a.name.localeCompare(b.name)));
+          } else if (payload.eventType === 'DELETE') {
+            setContacts(prev => prev.filter(contact => contact.id !== payload.old.id));
+          }
+        }
+      )
       .subscribe();
 
     return () => {
@@ -720,6 +787,7 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
           appliance_info: prop.applianceInfo,
           notes: prop.notes,
           image_uri: prop.imageUri,
+          custom_fields: normalizeCustomFields(prop.customFields),
         }).select().single();
 
         if (!error && data) {
@@ -863,6 +931,23 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
     const optimisticProperty: Property = { ...property, id: optimisticId };
     setProperties(prev => [...prev, optimisticProperty]);
 
+    let uploadedImageUri = property.imageUri;
+    if (property.imageUri) {
+      try {
+        uploadedImageUri = await uploadImageToStorageForProperty(
+          property.imageUri,
+          [PROPERTY_MEDIA_BUCKET],
+          householdId,
+          propertyInsertId,
+          'cover'
+        );
+      } catch (uploadError) {
+        setProperties(prev => prev.filter(p => p.id !== optimisticId));
+        console.error('Property cover image upload failed:', uploadError);
+        throw new Error('Failed to upload property photo to cloud storage. Please try again.');
+      }
+    }
+
     const fullPayload = {
       id: propertyInsertId,
       household_id: householdId,
@@ -870,20 +955,21 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       name: property.name,
       address: property.address,
       type: property.type,
-      purchase_date: property.purchaseDate,
+      purchase_date: normalizeOptionalDate(property.purchaseDate),
       purchase_price: property.purchasePrice,
       current_value: property.currentValue,
+      square_footage: property.squareFootage,
       monthly_rent: property.monthlyRent,
       tenant_name: property.tenantName,
       tenant_contact: property.tenantContact,
-      lease_start: property.leaseStart,
-      lease_end: property.leaseEnd,
+      lease_start: normalizeOptionalDate(property.leaseStart),
+      lease_end: normalizeOptionalDate(property.leaseEnd),
       mortgage_amount: property.mortgageAmount,
       mortgage_payment: property.mortgagePayment,
-      mortgage_renewal_date: property.mortgageRenewalDate,
+      mortgage_renewal_date: normalizeOptionalDate(property.mortgageRenewalDate),
       insurance_provider: property.insuranceProvider,
       insurance_policy: property.insurancePolicy,
-      insurance_renewal_date: property.insuranceRenewalDate,
+      insurance_renewal_date: normalizeOptionalDate(property.insuranceRenewalDate),
       insurance_premium: property.insurancePremium,
       property_tax: property.propertyTax,
       ac_capacitor_size: property.acCapacitorSize,
@@ -893,7 +979,10 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       water_heater_info: property.waterHeaterInfo,
       appliance_info: property.applianceInfo,
       notes: property.notes,
-      image_uri: property.imageUri,
+      image_uri: uploadedImageUri,
+      background_color: property.backgroundColor,
+      custom_fields: normalizeCustomFields(property.customFields),
+      display_order: property.displayOrder,
     };
 
     const requiredValues: Record<string, any> = {
@@ -967,7 +1056,11 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       throw new Error(`Failed to save property: ${formatSupabaseError(lastError)}${details}`);
     }
 
-    const insertedProperty = dbToProperty(data);
+    const insertedProperty = {
+      ...dbToProperty(data),
+      backgroundColor: dbToProperty(data).backgroundColor || property.backgroundColor,
+      imageUri: dbToProperty(data).imageUri || uploadedImageUri,
+    };
     setProperties(prev => prev.map(p => (p.id === optimisticId ? insertedProperty : p)));
     return insertedProperty;
   }, [householdId, user?.id]);
@@ -978,42 +1071,116 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       throw new Error('Property not found.');
     }
 
-    setProperties(prev => prev.map(p => (p.id === id ? { ...p, ...updates } : p)));
+    let normalizedUpdates = updates;
+    if (updates.imageUri !== undefined && updates.imageUri !== previousProperty.imageUri && updates.imageUri) {
+      if (!householdId) {
+        throw new Error('No household selected. Please create or join a household first.');
+      }
+
+      try {
+        const uploadedImageUri = await uploadImageToStorageForProperty(
+          updates.imageUri,
+          [PROPERTY_MEDIA_BUCKET],
+          householdId,
+          id,
+          'cover'
+        );
+        normalizedUpdates = { ...updates, imageUri: uploadedImageUri };
+      } catch (uploadError) {
+        console.error('Property cover image upload failed:', uploadError);
+        throw new Error('Failed to upload property photo to cloud storage. Please try again.');
+      }
+    }
+
+    setProperties(prev => prev.map(p => (p.id === id ? { ...p, ...normalizedUpdates } : p)));
 
     const updateData: Record<string, any> = { updated_at: new Date().toISOString() };
-    if (updates.name !== undefined) updateData.name = updates.name;
-    if (updates.address !== undefined) updateData.address = updates.address;
-    if (updates.type !== undefined) updateData.type = updates.type;
-    if (updates.purchaseDate !== undefined) updateData.purchase_date = updates.purchaseDate;
-    if (updates.purchasePrice !== undefined) updateData.purchase_price = updates.purchasePrice;
-    if (updates.currentValue !== undefined) updateData.current_value = updates.currentValue;
-    if (updates.monthlyRent !== undefined) updateData.monthly_rent = updates.monthlyRent;
-    if (updates.tenantName !== undefined) updateData.tenant_name = updates.tenantName;
-    if (updates.tenantContact !== undefined) updateData.tenant_contact = updates.tenantContact;
-    if (updates.leaseStart !== undefined) updateData.lease_start = updates.leaseStart;
-    if (updates.leaseEnd !== undefined) updateData.lease_end = updates.leaseEnd;
-    if (updates.mortgageAmount !== undefined) updateData.mortgage_amount = updates.mortgageAmount;
-    if (updates.mortgagePayment !== undefined) updateData.mortgage_payment = updates.mortgagePayment;
-    if (updates.mortgageRenewalDate !== undefined) updateData.mortgage_renewal_date = updates.mortgageRenewalDate;
-    if (updates.insuranceProvider !== undefined) updateData.insurance_provider = updates.insuranceProvider;
-    if (updates.insurancePolicy !== undefined) updateData.insurance_policy = updates.insurancePolicy;
-    if (updates.insuranceRenewalDate !== undefined) updateData.insurance_renewal_date = updates.insuranceRenewalDate;
-    if (updates.insurancePremium !== undefined) updateData.insurance_premium = updates.insurancePremium;
-    if (updates.propertyTax !== undefined) updateData.property_tax = updates.propertyTax;
-    if (updates.acCapacitorSize !== undefined) updateData.ac_capacitor_size = updates.acCapacitorSize;
-    if (updates.acFilterSize !== undefined) updateData.ac_filter_size = updates.acFilterSize;
-    if (updates.paintColorsInside !== undefined) updateData.paint_colors_inside = updates.paintColorsInside;
-    if (updates.paintColorsOutside !== undefined) updateData.paint_colors_outside = updates.paintColorsOutside;
-    if (updates.waterHeaterInfo !== undefined) updateData.water_heater_info = updates.waterHeaterInfo;
-    if (updates.applianceInfo !== undefined) updateData.appliance_info = updates.applianceInfo;
-    if (updates.notes !== undefined) updateData.notes = updates.notes;
-    if (updates.imageUri !== undefined) updateData.image_uri = updates.imageUri;
+    if (normalizedUpdates.name !== undefined) updateData.name = normalizedUpdates.name;
+    if (normalizedUpdates.address !== undefined) updateData.address = normalizedUpdates.address;
+    if (normalizedUpdates.type !== undefined) updateData.type = normalizedUpdates.type;
+    if (normalizedUpdates.purchaseDate !== undefined) updateData.purchase_date = normalizeOptionalDate(normalizedUpdates.purchaseDate);
+    if (normalizedUpdates.purchasePrice !== undefined) updateData.purchase_price = normalizedUpdates.purchasePrice;
+    if (normalizedUpdates.currentValue !== undefined) updateData.current_value = normalizedUpdates.currentValue;
+    if (normalizedUpdates.squareFootage !== undefined) updateData.square_footage = normalizedUpdates.squareFootage;
+    if (normalizedUpdates.monthlyRent !== undefined) updateData.monthly_rent = normalizedUpdates.monthlyRent;
+    if (normalizedUpdates.tenantName !== undefined) updateData.tenant_name = normalizedUpdates.tenantName;
+    if (normalizedUpdates.tenantContact !== undefined) updateData.tenant_contact = normalizedUpdates.tenantContact;
+    if (normalizedUpdates.leaseStart !== undefined) updateData.lease_start = normalizeOptionalDate(normalizedUpdates.leaseStart);
+    if (normalizedUpdates.leaseEnd !== undefined) updateData.lease_end = normalizeOptionalDate(normalizedUpdates.leaseEnd);
+    if (normalizedUpdates.mortgageAmount !== undefined) updateData.mortgage_amount = normalizedUpdates.mortgageAmount;
+    if (normalizedUpdates.mortgagePayment !== undefined) updateData.mortgage_payment = normalizedUpdates.mortgagePayment;
+    if (normalizedUpdates.mortgageRenewalDate !== undefined) updateData.mortgage_renewal_date = normalizeOptionalDate(normalizedUpdates.mortgageRenewalDate);
+    if (normalizedUpdates.insuranceProvider !== undefined) updateData.insurance_provider = normalizedUpdates.insuranceProvider;
+    if (normalizedUpdates.insurancePolicy !== undefined) updateData.insurance_policy = normalizedUpdates.insurancePolicy;
+    if (normalizedUpdates.insuranceRenewalDate !== undefined) updateData.insurance_renewal_date = normalizeOptionalDate(normalizedUpdates.insuranceRenewalDate);
+    if (normalizedUpdates.insurancePremium !== undefined) updateData.insurance_premium = normalizedUpdates.insurancePremium;
+    if (normalizedUpdates.propertyTax !== undefined) updateData.property_tax = normalizedUpdates.propertyTax;
+    if (normalizedUpdates.acCapacitorSize !== undefined) updateData.ac_capacitor_size = normalizedUpdates.acCapacitorSize;
+    if (normalizedUpdates.acFilterSize !== undefined) updateData.ac_filter_size = normalizedUpdates.acFilterSize;
+    if (normalizedUpdates.paintColorsInside !== undefined) updateData.paint_colors_inside = normalizedUpdates.paintColorsInside;
+    if (normalizedUpdates.paintColorsOutside !== undefined) updateData.paint_colors_outside = normalizedUpdates.paintColorsOutside;
+    if (normalizedUpdates.waterHeaterInfo !== undefined) updateData.water_heater_info = normalizedUpdates.waterHeaterInfo;
+    if (normalizedUpdates.applianceInfo !== undefined) updateData.appliance_info = normalizedUpdates.applianceInfo;
+    if (normalizedUpdates.notes !== undefined) updateData.notes = normalizedUpdates.notes;
+    if (normalizedUpdates.imageUri !== undefined) updateData.image_uri = normalizedUpdates.imageUri;
+    if (normalizedUpdates.backgroundColor !== undefined) updateData.background_color = normalizedUpdates.backgroundColor;
+    if (normalizedUpdates.customFields !== undefined) updateData.custom_fields = normalizeCustomFields(normalizedUpdates.customFields);
+    if (normalizedUpdates.displayOrder !== undefined) updateData.display_order = normalizedUpdates.displayOrder;
 
-    const { error } = await supabase.from('properties').update(updateData).eq('id', id);
-    if (error) {
+    let currentUpdateData = compactPayload(updateData);
+    let lastError: any = null;
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const { error } = await supabase.from('properties').update(currentUpdateData).eq('id', id);
+      if (!error) {
+        lastError = null;
+        break;
+      }
+
+      lastError = error;
+      const missingColumn = extractMissingColumn(error);
+      if (
+        !missingColumn ||
+        NON_DROPPABLE_PROPERTY_COLUMNS.has(missingColumn) ||
+        !Object.prototype.hasOwnProperty.call(currentUpdateData, missingColumn)
+      ) {
+        break;
+      }
+
+      delete currentUpdateData[missingColumn];
+      if (Object.keys(currentUpdateData).length === 0) break;
+    }
+
+    if (lastError) {
       setProperties(prev => prev.map(p => (p.id === id ? previousProperty : p)));
-      console.error('Error updating property:', error);
-      throw error;
+      console.error('Error updating property:', lastError);
+      throw lastError;
+    }
+  }, [properties]);
+
+  const reorderProperties = useCallback(async (orderedPropertyIds: string[]) => {
+    const previousProperties = properties;
+    const displayOrderById = new Map(orderedPropertyIds.map((id, index) => [id, index]));
+
+    setProperties(prev => prev.map(property => ({
+      ...property,
+      displayOrder: displayOrderById.get(property.id) ?? property.displayOrder,
+    })));
+
+    const results = await Promise.all(
+      orderedPropertyIds.map((id, index) =>
+        supabase
+          .from('properties')
+          .update({ display_order: index, updated_at: new Date().toISOString() })
+          .eq('id', id)
+      )
+    );
+    const failed = results.find(result => result.error);
+
+    if (failed?.error) {
+      setProperties(previousProperties);
+      console.error('Error reordering properties:', failed.error);
+      throw failed.error;
     }
   }, [properties]);
 
@@ -1066,8 +1233,8 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       type: transaction.type,
       category: transaction.category,
       amount: transaction.amount,
-      tx_date: transaction.date,
-      date: transaction.date,
+      tx_date: normalizeStoredDate(transaction.date),
+      date: normalizeStoredDate(transaction.date),
       description: transaction.description,
       receipt_uri: transaction.receiptUri,
       tags: transaction.tags,
@@ -1101,8 +1268,8 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
     if (updates.category !== undefined) updateData.category = updates.category;
     if (updates.amount !== undefined) updateData.amount = updates.amount;
     if (updates.date !== undefined) {
-      updateData.tx_date = updates.date;
-      updateData.date = updates.date;
+      updateData.tx_date = normalizeStoredDate(updates.date);
+      updateData.date = normalizeStoredDate(updates.date);
     }
     if (updates.description !== undefined) updateData.description = updates.description;
     if (updates.receiptUri !== undefined) updateData.receipt_uri = updates.receiptUri;
@@ -1161,8 +1328,8 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       household_id: householdId,
       property_id: receipt.propertyId,
       uri: uploadedUri,
-      receipt_date: receipt.date,
-      date: receipt.date,
+      receipt_date: normalizeStoredDate(receipt.date),
+      date: normalizeStoredDate(receipt.date),
       amount: receipt.amount,
       vendor: receipt.vendor,
       category: receipt.category,
@@ -1194,8 +1361,8 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
         type: 'expense',
         category: receipt.category,
         amount: receipt.amount,
-        tx_date: receipt.date,
-        date: receipt.date,
+        tx_date: normalizeStoredDate(receipt.date),
+        date: normalizeStoredDate(receipt.date),
         description: receipt.vendor ? `Receipt from ${receipt.vendor}` : 'Receipt expense',
         receipt_uri: uploadedUri,
         tags: receipt.tags || [],
@@ -1217,8 +1384,8 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
     const updateData: Record<string, any> = { updated_at: new Date().toISOString() };
     if (updates.uri !== undefined) updateData.uri = updates.uri;
     if (updates.date !== undefined) {
-      updateData.receipt_date = updates.date;
-      updateData.date = updates.date;
+      updateData.receipt_date = normalizeStoredDate(updates.date);
+      updateData.date = normalizeStoredDate(updates.date);
     }
     if (updates.amount !== undefined) updateData.amount = updates.amount;
     if (updates.vendor !== undefined) updateData.vendor = updates.vendor;
@@ -1447,6 +1614,98 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
     setPropertyPhotos(prev => prev.map(photo => (photo.id === id ? updatedPhoto : photo)));
   }, [propertyPhotos]);
 
+  const addContact = useCallback(async (contact: PortfolioContact): Promise<PortfolioContact> => {
+    if (!householdId) {
+      throw new Error('No household selected. Please create or join a household first.');
+    }
+
+    if (!user?.id) {
+      throw new Error('No authenticated user found. Please sign in again and retry.');
+    }
+
+    const optimisticId = `tmp_contact_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticContact: PortfolioContact = { ...contact, id: optimisticId };
+    setContacts(prev => [...prev, optimisticContact].sort((a, b) => a.name.localeCompare(b.name)));
+
+    const { data, error } = await supabase.from('household_contacts').insert(compactPayload({
+      household_id: householdId,
+      user_id: user.id,
+      name: contact.name.trim(),
+      category: normalizeContactCategory(contact.category),
+      phone_numbers: normalizeContactPhoneNumbers(contact.phoneNumbers),
+      company: contact.company?.trim() || undefined,
+      email: contact.email?.trim() || undefined,
+      address: contact.address?.trim() || undefined,
+      tags: normalizeTags(contact.tags),
+      notes: contact.notes?.trim() || undefined,
+    })).select('*').single();
+
+    if (error) {
+      setContacts(prev => prev.filter(item => item.id !== optimisticId));
+      console.error('Error adding contact:', error);
+      throw error;
+    }
+
+    if (!data) {
+      setContacts(prev => prev.filter(item => item.id !== optimisticId));
+      throw new Error('Contact insert succeeded but no row was returned.');
+    }
+
+    const insertedContact = dbToContact(data);
+    setContacts(prev => prev.map(item => item.id === optimisticId ? insertedContact : item).sort((a, b) => a.name.localeCompare(b.name)));
+    return insertedContact;
+  }, [householdId, user?.id]);
+
+  const updateContact = useCallback(async (id: string, updates: Partial<PortfolioContact>) => {
+    const previousContact = contacts.find(contact => contact.id === id);
+    if (!previousContact) {
+      throw new Error('Contact not found.');
+    }
+
+    const optimisticContact = { ...previousContact, ...updates };
+    setContacts(prev => prev.map(contact => contact.id === id ? optimisticContact : contact).sort((a, b) => a.name.localeCompare(b.name)));
+
+    const updateData: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (updates.name !== undefined) updateData.name = updates.name.trim();
+    if (updates.category !== undefined) updateData.category = normalizeContactCategory(updates.category);
+    if (updates.phoneNumbers !== undefined) updateData.phone_numbers = normalizeContactPhoneNumbers(updates.phoneNumbers);
+    if (updates.company !== undefined) updateData.company = updates.company.trim() || null;
+    if (updates.email !== undefined) updateData.email = updates.email.trim() || null;
+    if (updates.address !== undefined) updateData.address = updates.address.trim() || null;
+    if (updates.tags !== undefined) updateData.tags = normalizeTags(updates.tags);
+    if (updates.notes !== undefined) updateData.notes = updates.notes.trim() || null;
+
+    const { data, error } = await supabase
+      .from('household_contacts')
+      .update(updateData)
+      .eq('id', id)
+      .select('*')
+      .single();
+
+    if (error) {
+      setContacts(prev => prev.map(contact => contact.id === id ? previousContact : contact).sort((a, b) => a.name.localeCompare(b.name)));
+      console.error('Error updating contact:', error);
+      throw error;
+    }
+
+    if (data) {
+      const updatedContact = dbToContact(data);
+      setContacts(prev => prev.map(contact => contact.id === id ? updatedContact : contact).sort((a, b) => a.name.localeCompare(b.name)));
+    }
+  }, [contacts]);
+
+  const deleteContact = useCallback(async (id: string) => {
+    const snapshot = contacts;
+    setContacts(prev => prev.filter(contact => contact.id !== id));
+
+    const { error } = await supabase.from('household_contacts').delete().eq('id', id);
+    if (error) {
+      setContacts(snapshot);
+      console.error('Error deleting contact:', error);
+      throw error;
+    }
+  }, [contacts]);
+
   // Lease Folder CRUD operations
   const addLeaseFolder = useCallback(async (folder: LeaseFolder): Promise<LeaseFolder> => {
     if (!householdId) {
@@ -1563,7 +1822,7 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       original_image_uri: savedOriginalImageUri,
       tags: document.tags,
       tenant_name: document.tenantName,
-      date_of_document: document.dateOfDocument,
+      date_of_document: normalizeOptionalDate(document.dateOfDocument),
       notes: document.notes,
     }, 'insert');
     if (error) {
@@ -1598,7 +1857,7 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
     if (updates.originalImageUri !== undefined) updateData.original_image_uri = updates.originalImageUri;
     if (updates.tags !== undefined) updateData.tags = updates.tags;
     if (updates.tenantName !== undefined) updateData.tenant_name = updates.tenantName;
-    if (updates.dateOfDocument !== undefined) updateData.date_of_document = updates.dateOfDocument;
+    if (updates.dateOfDocument !== undefined) updateData.date_of_document = normalizeOptionalDate(updates.dateOfDocument);
     if (updates.notes !== undefined) updateData.notes = updates.notes;
     if (updates.folderId !== undefined) updateData.folder_id = updates.folderId || null;
     if (updates.propertyId !== undefined) updateData.property_id = updates.propertyId;
@@ -1852,15 +2111,16 @@ ${document.tags.length > 0 ? `\nTags: ${document.tags.join(', ')}` : ''}
   }, []);
 
   return {
-    properties, transactions, receipts, reminders, leaseFolders, leaseDocuments, propertyPhotos,
+    properties, transactions, receipts, reminders, leaseFolders, leaseDocuments, propertyPhotos, contacts,
     isLoading, isSyncing,
-    addProperty, updateProperty, deleteProperty,
+    addProperty, updateProperty, reorderProperties, deleteProperty,
     addTransaction, updateTransaction, deleteTransaction,
     addReceipt, updateReceipt, deleteReceipt,
     addReminder, updateReminder, deleteReminder,
     addLeaseFolder, updateLeaseFolder, deleteLeaseFolder, reorderLeaseFolders,
     addLeaseDocument, updateLeaseDocument, deleteLeaseDocument,
     addPropertyPhoto, updatePropertyPhoto, deletePropertyPhoto,
+    addContact, updateContact, deleteContact,
     extractTextFromImage, exportLeaseDocument,
     portfolioMetrics, upcomingReminders,
     exportTransactionsToExcel, saveReceiptWithLocation,

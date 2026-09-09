@@ -18,6 +18,34 @@ export interface PaintColor {
   notes?: string;
 }
 
+export interface CustomPropertyField {
+  id: string;
+  label: string;
+  value: string;
+}
+
+export interface ContactPhoneNumber {
+  id: string;
+  label: string;
+  number: string;
+}
+
+export type ContactCategory = 'contractor' | 'insurance' | 'tenant' | 'buyer-seller' | 'lead' | 'other';
+
+export interface PortfolioContact {
+  id: string;
+  name: string;
+  category: ContactCategory;
+  phoneNumbers: ContactPhoneNumber[];
+  company?: string;
+  email?: string;
+  address?: string;
+  tags: string[];
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface Property {
   id: string;
   name: string;
@@ -26,6 +54,7 @@ export interface Property {
   purchaseDate: string;
   purchasePrice: number;
   currentValue?: number;
+  squareFootage?: number;
   monthlyRent: number;
   tenantName?: string;
   tenantContact?: string;
@@ -49,6 +78,9 @@ export interface Property {
   applianceInfo?: string;
   notes?: string;
   imageUri?: string;
+  backgroundColor?: string;
+  customFields?: CustomPropertyField[];
+  displayOrder?: number;
 }
 
 export interface Transaction {

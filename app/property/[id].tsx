@@ -21,6 +21,7 @@ import { Edit, Home, DollarSign, FileText, Bell, Plus, Trash2, Image as ImageIco
 import { Linking } from "react-native";
 import * as Calendar from "expo-calendar";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { formatDisplayDate, parseStoredDate } from "@/lib/dates";
 
 export default function PropertyDetailsScreen() {
   const { id } = useLocalSearchParams();
@@ -65,42 +66,11 @@ export default function PropertyDetailsScreen() {
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return '—';
-
-    const parts = dateString.split('-');
-    let date: Date;
-    if (parts.length === 3 && parts[0].length <= 2) {
-      const month = parseInt(parts[0], 10) - 1;
-      const day = parseInt(parts[1], 10);
-      const yearPart = parseInt(parts[2], 10);
-      const year = parts[2].length === 2 ? yearPart + 2000 : yearPart;
-      date = new Date(year, month, day);
-    } else {
-      date = new Date(dateString);
-    }
-
-    if (Number.isNaN(date.getTime())) {
-      return dateString;
-    }
-
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    const year = date.getFullYear().toString().slice(-2);
-    return `${month}-${day}-${year}`;
+    return formatDisplayDate(dateString);
   };
 
   const formatTransactionDate = (dateString: string) => {
-    const parts = dateString.split('-');
-    let date: Date;
-    if (parts.length === 3 && parts[0].length <= 2) {
-      const month = parseInt(parts[0], 10) - 1;
-      const day = parseInt(parts[1], 10);
-      const yearPart = parseInt(parts[2], 10);
-      const year = parts[2].length === 2 ? yearPart + 2000 : yearPart;
-      date = new Date(year, month, day);
-    } else {
-      date = new Date(dateString);
-    }
-
+    const date = parseStoredDate(dateString);
     if (Number.isNaN(date.getTime())) {
       return dateString;
     }
@@ -169,13 +139,10 @@ export default function PropertyDetailsScreen() {
     }
   };
 
-  const saveSelectedPhotos = async () => {
+  const saveSelectedPhotos = () => {
     if (selectedPhotoUris.length === 0 || isSavingPhoto) return;
 
     const totalSelected = selectedPhotoUris.length;
-    setIsSavingPhoto(true);
-    setPhotoSaveProgress({ completed: 0, total: totalSelected });
-
     const photosToSave: PropertyPhoto[] = selectedPhotoUris.map((uri, index) => ({
       id: `photo_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
       propertyId: id as string,
@@ -183,6 +150,13 @@ export default function PropertyDetailsScreen() {
       caption: (photoCaptions[index] || '').trim(),
       date: new Date().toISOString(),
     }));
+
+    // Close the wizard immediately: addPropertyPhoto adds each photo to local
+    // state right away, then uploads/syncs to the cloud in the background.
+    resetPhotoWizard();
+
+    setIsSavingPhoto(true);
+    setPhotoSaveProgress({ completed: 0, total: totalSelected });
 
     let nextIndex = 0;
     let failureCount = 0;
@@ -202,24 +176,22 @@ export default function PropertyDetailsScreen() {
       }
     };
 
-    try {
-      await Promise.all(Array.from({ length: workerCount }, () => saveWorker()));
-
-      resetPhotoWizard();
-      if (failureCount === 0) {
-        Alert.alert('Success', totalSelected > 1 ? `${totalSelected} photos added.` : 'Photo added.');
-      } else if (failureCount < totalSelected) {
-        Alert.alert('Partial Success', `${totalSelected - failureCount} photo(s) added. ${failureCount} failed. Please retry failed photos.`);
-      } else {
-        Alert.alert('Error', totalSelected > 1 ? 'Failed to add photos. Please try again.' : 'Failed to save photo. Please try again.');
-      }
-    } catch (error) {
-      console.error('Error saving photo(s):', error);
-      Alert.alert('Error', totalSelected > 1 ? 'Failed to add one or more photos. Please try again.' : 'Failed to save photo. Please try again.');
-    } finally {
-      setIsSavingPhoto(false);
-      setPhotoSaveProgress({ completed: 0, total: 0 });
-    }
+    Promise.all(Array.from({ length: workerCount }, () => saveWorker()))
+      .then(() => {
+        if (failureCount > 0 && failureCount < totalSelected) {
+          Alert.alert('Partial Sync Issue', `${totalSelected - failureCount} photo(s) synced. ${failureCount} failed to upload. Please retry the failed ones.`);
+        } else if (failureCount === totalSelected) {
+          Alert.alert('Sync Failed', totalSelected > 1 ? 'Failed to sync photos to the cloud. Please try again.' : 'Failed to sync photo to the cloud. Please try again.');
+        }
+      })
+      .catch((error) => {
+        console.error('Error saving photo(s):', error);
+        Alert.alert('Sync Failed', totalSelected > 1 ? 'Failed to sync one or more photos. Please try again.' : 'Failed to sync photo. Please try again.');
+      })
+      .finally(() => {
+        setIsSavingPhoto(false);
+        setPhotoSaveProgress({ completed: 0, total: 0 });
+      });
   };
 
   const handlePhotoWizardPrimaryAction = async () => {
@@ -227,7 +199,7 @@ export default function PropertyDetailsScreen() {
       setPhotoWizardIndex(prev => prev + 1);
       return;
     }
-    await saveSelectedPhotos();
+    saveSelectedPhotos();
   };
 
   const deletePhoto = (photoId: string) => {
@@ -688,6 +660,20 @@ export default function PropertyDetailsScreen() {
                       <Text style={styles.detailValue}>{property.applianceInfo}</Text>
                     </View>
                   )}
+                </View>
+              </View>
+            )}
+
+            {!!property.customFields?.length && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Custom Information</Text>
+                <View style={styles.detailsGrid}>
+                  {property.customFields.map(field => (
+                    <View key={field.id} style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>{field.label}</Text>
+                      <Text style={[styles.detailValue, styles.customDetailValue]}>{field.value}</Text>
+                    </View>
+                  ))}
                 </View>
               </View>
             )}
@@ -1259,6 +1245,12 @@ const styles = StyleSheet.create({
     fontWeight: "500" as const,
     color: "#111827",
     textTransform: "capitalize" as const,
+  },
+  customDetailValue: {
+    flex: 1,
+    marginLeft: 12,
+    textAlign: "right",
+    textTransform: "none" as const,
   },
   applianceCard: {
     backgroundColor: "#FFFFFF",

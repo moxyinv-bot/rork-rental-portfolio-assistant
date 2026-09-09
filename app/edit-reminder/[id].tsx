@@ -19,6 +19,7 @@ import { REMINDER_TYPES } from "@/constants/categories";
 import { Calendar, Bell, ChevronDown, Phone, Mail, Trash2 } from "lucide-react-native";
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from "react-native-safe-area-context";
+import { toStoredDate, formatDisplayDate, parseStoredDate } from "@/lib/dates";
 
 export default function EditReminderScreen() {
   const { id } = useLocalSearchParams();
@@ -27,37 +28,11 @@ export default function EditReminderScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
 
-  const formatDate = (date: Date) => {
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const day = date.getDate().toString().padStart(2, '0');
-    const year = date.getFullYear().toString().slice(-2);
-    return `${month}-${day}-${year}`;
-  };
+  const formatDate = toStoredDate;
 
   const parseDateString = (value: string): Date => {
-    const normalized = value.replace(/\//g, '-');
-    const parts = normalized.split('-');
-    if (parts.length === 3) {
-      const [a, b, c] = parts;
-      const n1 = parseInt(a, 10);
-      const n2 = parseInt(b, 10);
-      const n3 = parseInt(c, 10);
-
-      if (!Number.isNaN(n1) && !Number.isNaN(n2) && !Number.isNaN(n3)) {
-        // MM-DD-YY or MM-DD-YYYY
-        if (a.length <= 2) {
-          const year = c.length === 2 ? n3 + 2000 : n3;
-          return new Date(year, n1 - 1, n2);
-        }
-
-        // YYYY-MM-DD
-        if (a.length === 4) {
-          return new Date(n1, n2 - 1, n3);
-        }
-      }
-    }
-    const fallback = new Date(value);
-    return Number.isNaN(fallback.getTime()) ? new Date() : fallback;
+    const parsed = parseStoredDate(value);
+    return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
   };
 
   const reminder = reminders.find(r => r.id === id);
@@ -259,8 +234,8 @@ export default function EditReminderScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["bottom"]}>
     <KeyboardAvoidingView 
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 20}
+      behavior="padding"
+      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 64}
       style={{ flex: 1 }}
     >
       <ScrollView 
@@ -332,7 +307,7 @@ export default function EditReminderScreen() {
             >
               <Calendar size={20} color="#6B7280" />
               <Text style={[styles.dateInput, !formData.dueDate ? styles.placeholderText : undefined]}>
-                {formData.dueDate || 'MM-DD-YY'}
+                {formatDisplayDate(formData.dueDate) || 'MM/DD/YYYY'}
               </Text>
             </TouchableOpacity>
           </View>

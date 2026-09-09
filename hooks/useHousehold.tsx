@@ -55,7 +55,7 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
   const [error, setError] = useState<string | null>(null);
 
   const ensureCurrentProfile = useCallback(async () => {
-    if (!user || user.id === 'guest') return;
+    if (!user) return;
 
     const { error: upsertError } = await supabase
       .from('profiles')
@@ -73,7 +73,21 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
     if (upsertError) {
       console.error('Error ensuring current user profile:', upsertError);
     }
-  }, [user, ensureCurrentProfile]);
+  }, [user]);
+
+  const consolidateCurrentUserMemberships = useCallback(async () => {
+    if (!user) return false;
+
+    const { error: consolidationError } = await supabase.rpc('consolidate_current_user_memberships');
+    if (!consolidationError) return true;
+
+    console.warn('Legacy household membership consolidation failed:', consolidationError);
+    if (consolidationError.code === 'PGRST202') {
+      setError('Household identity cleanup is not installed yet. Ask the administrator to apply the identity cleanup migration.');
+    }
+
+    return false;
+  }, [user]);
 
   // Load active household when user changes
   useEffect(() => {
@@ -113,6 +127,7 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
       setIsLoading(true);
       setError(null);
       await ensureCurrentProfile();
+      await consolidateCurrentUserMemberships();
 
       // Check for stored active household
       const storedId = await AsyncStorage.getItem(ACTIVE_HOUSEHOLD_KEY);
@@ -254,7 +269,37 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
       };
     });
 
-    setMembers(formattedMembers);
+    const deduplicatedMembers = Array.from(
+      formattedMembers.reduce<Map<string, HouseholdMember>>((byIdentity, member) => {
+        const normalizedEmail = member.profile?.email?.trim().toLowerCase();
+        const identityKey = normalizedEmail || member.user_id;
+        const existing = byIdentity.get(identityKey);
+
+        if (!existing) {
+          byIdentity.set(identityKey, member);
+          return byIdentity;
+        }
+
+        const memberIsCurrentUser = member.user_id === user?.id;
+        const existingIsCurrentUser = existing.user_id === user?.id;
+        const shouldReplace =
+          memberIsCurrentUser ||
+          (!existingIsCurrentUser && member.role === 'owner' && existing.role !== 'owner');
+
+        if (shouldReplace) {
+          byIdentity.set(identityKey, {
+            ...member,
+            role: existing.role === 'owner' ? 'owner' : member.role,
+          });
+        } else if (member.role === 'owner' && existing.role !== 'owner') {
+          byIdentity.set(identityKey, { ...existing, role: 'owner' });
+        }
+
+        return byIdentity;
+      }, new Map()).values()
+    );
+
+    setMembers(deduplicatedMembers);
   }, [user?.email, user?.id, user?.name]);
 
   const createHousehold = useCallback(async (name: string): Promise<Household | null> => {
@@ -263,34 +308,27 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
       setError(null);
 
       const { data: householdData, error: createErr } = await supabase
-        .from('households')
-        .insert({ name, created_by: user.id })
-        .select()
+        .rpc('create_household_for_current_user', { household_name: name.trim() })
         .single();
 
       if (createErr) throw createErr;
-
-      const { error: memberErr } = await supabase
-        .from('household_members')
-        .insert({
-          household_id: householdData.id,
-          user_id: user.id,
-          role: 'owner',
-        });
-
-      if (memberErr) throw memberErr;
+      if (!householdData) throw new Error('Household creation returned no record.');
 
       await AsyncStorage.setItem(ACTIVE_HOUSEHOLD_KEY, householdData.id);
       setError(null);
       setHousehold(householdData as Household);
+      await consolidateCurrentUserMemberships();
       await loadMembers(householdData.id);
       return householdData as Household;
     } catch (err) {
       console.error('Error creating household:', err);
-      setError(err instanceof Error ? err.message : 'Failed to create household');
+      const message = err instanceof Error ? err.message : 'Failed to create household';
+      setError(message.includes('function') && message.includes('does not exist')
+        ? 'Household setup is not installed yet. Ask the administrator to apply the household security migration.'
+        : message);
       return null;
     }
-  }, [user, loadMembers]);
+  }, [user, loadMembers, consolidateCurrentUserMemberships]);
 
   const joinHousehold = useCallback(async (inviteCode: string): Promise<Household | null> => {
     if (!user) return null;
@@ -298,43 +336,33 @@ export const [HouseholdProvider, useHousehold] = createContextHook(() => {
       setError(null);
 
       const { data: householdData, error: findErr } = await supabase
-        .from('households')
-        .select('*')
-        .eq('invite_code', inviteCode.toUpperCase().trim())
+        .rpc('join_household_by_invite', { invite_code_input: inviteCode.toUpperCase().trim() })
         .single();
 
       if (findErr) {
-        setError('Invalid invite code');
-        return null;
+        throw findErr;
       }
-
-      const { error: memberErr } = await supabase
-        .from('household_members')
-        .insert({
-          household_id: householdData.id,
-          user_id: user.id,
-          role: 'member',
-        });
-
-      if (memberErr) {
-        if (memberErr.code === '23505') {
-          setError(null);
-        } else {
-          throw memberErr;
-        }
-      }
+      if (!householdData) throw new Error('That invite code was not found.');
 
       await AsyncStorage.setItem(ACTIVE_HOUSEHOLD_KEY, householdData.id);
       setError(null);
       setHousehold(householdData as Household);
+      await consolidateCurrentUserMemberships();
       await loadMembers(householdData.id);
       return householdData as Household;
     } catch (err) {
       console.error('Error joining household:', err);
-      setError(err instanceof Error ? err.message : 'Failed to join household');
+      const message = err instanceof Error ? err.message : 'Failed to join household';
+      setError(
+        message.includes('not found') || message.includes('P0002')
+          ? 'That invite code was not found. Check all six characters and try again.'
+          : message.includes('function') && message.includes('does not exist')
+            ? 'Household setup is not installed yet. Ask the administrator to apply the household security migration.'
+            : message
+      );
       return null;
     }
-  }, [user, loadMembers]);
+  }, [user, loadMembers, consolidateCurrentUserMemberships]);
 
   const switchHousehold = useCallback(async (householdId: string): Promise<void> => {
     try {

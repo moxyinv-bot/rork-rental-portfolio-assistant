@@ -26,6 +26,20 @@ export const INCOME_CATEGORIES = [
   'Other'
 ] as const;
 
+// Colors that contrast well with white text (light text on dark backgrounds)
+export const PROPERTY_BACKGROUND_COLORS = [
+  { label: 'Ocean Blue', value: '#0369A1' },
+  { label: 'Forest Green', value: '#15803D' },
+  { label: 'Purple', value: '#7C3AED' },
+  { label: 'Slate', value: '#1E293B' },
+  { label: 'Indigo', value: '#4F46E5' },
+  { label: 'Teal', value: '#0D9488' },
+  { label: 'Rose', value: '#BE123C' },
+  { label: 'Amber', value: '#B45309' },
+  { label: 'Cyan', value: '#0891B2' },
+  { label: 'Emerald', value: '#059669' },
+];
+
 export const PROPERTY_TYPES = [
   { value: 'single-family', label: 'Single Family' },
   { value: 'multi-family', label: 'Multi Family' },

@@ -11,7 +11,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Building2 } from "lucide-react-native";
 
 export default function LoginScreen() {
-  const { isSigningIn, error, signIn, signInGuest, clearError } = useAuth();
+  const { isSigningIn, error, signIn, clearError } = useAuth();
 
   return (
     <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
@@ -21,9 +21,9 @@ export default function LoginScreen() {
           <View style={styles.logoCircle}>
             <Building2 size={48} color="#FFFFFF" />
           </View>
-          <Text style={styles.appName}>Rental Portfolio</Text>
+          <Text style={styles.appName}>PadCommand</Text>
           <Text style={styles.tagline}>
-            Manage your properties together — synced across all your devices
+            Meet PadCommand - your command center for managing everything you own.
           </Text>
         </View>
 
@@ -73,28 +73,10 @@ export default function LoginScreen() {
             <Text style={styles.googleButtonText}>Continue with Google</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.appleButton, isSigningIn && styles.buttonDisabled]}
-            onPress={() => signIn("apple")}
-            disabled={isSigningIn}
-            activeOpacity={0.8}
-          >
-            <AppleIcon />
-            <Text style={styles.appleButtonText}>Continue with Apple</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.guestButton, isSigningIn && styles.buttonDisabled]}
-            onPress={() => signInGuest()}
-            disabled={isSigningIn}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.guestButtonText}>Continue as Guest</Text>
-          </TouchableOpacity>
         </View>
 
         <Text style={styles.footerText}>
-          By signing in, you agree to sync your rental portfolio data across your devices.
+          By signing in, you agree to sync your PadCommand data across your devices.
         </Text>
       </View>
     </SafeAreaView>
@@ -105,14 +87,6 @@ function GoogleIcon() {
   return (
     <View style={styles.googleIconWrapper}>
       <Text style={styles.googleIconG}>G</Text>
-    </View>
-  );
-}
-
-function AppleIcon() {
-  return (
-    <View style={styles.appleIconWrapper}>
-      <Text style={styles.appleIcon}></Text>
     </View>
   );
 }

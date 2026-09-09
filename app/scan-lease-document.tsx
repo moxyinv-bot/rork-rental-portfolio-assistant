@@ -8,7 +8,8 @@ import {
   ActivityIndicator,
   Platform,
   ScrollView,
-  TextInput
+  TextInput,
+  KeyboardAvoidingView
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Stack, router } from 'expo-router';
@@ -240,10 +241,16 @@ export default function ScanLeaseDocumentScreen() {
         }}
       />
 
+      <KeyboardAvoidingView
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 64}
+        style={{ flex: 1 }}
+      >
       <ScrollView 
         style={styles.content} 
         contentContainerStyle={{ paddingBottom: 16 }}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         {!capturedImage ? (
           <View style={styles.captureSection}>
@@ -486,6 +493,7 @@ export default function ScanLeaseDocumentScreen() {
           </View>
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {showDatePicker && (
         <DateTimePicker
