@@ -15,7 +15,9 @@ expo-env.d.ts
 *.p8
 *.p12
 *.key
+*.keystore
 *.mobileprovision
+keystore.properties
 
 # Metro
 .metro-health-check*
@@ -38,6 +40,15 @@ yarn-error.*
 
 # local scratch/debug output and secrets
 tmp/
+
+.easignore
+*.apk
+*.aab
+padcommand.apk
+android/.gradle/
+android/build/
+android/app/build/
+android/app/.cxx/
 
 ios/
 android/
