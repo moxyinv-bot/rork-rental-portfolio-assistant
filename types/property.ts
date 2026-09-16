@@ -68,6 +68,7 @@ export interface Property {
   insuranceRenewalDate?: string;
   insurancePremium?: number;
   propertyTax?: number;
+  propertyTaxDueDate?: string;
   appliances: Appliance[];
   paintColors: PaintColor[];
   acCapacitorSize?: string;
@@ -92,6 +93,7 @@ export interface Transaction {
   date: string;
   description: string;
   receiptUri?: string;
+  receiptName?: string;
   tags: string[];
 }
 

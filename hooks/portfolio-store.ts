@@ -108,6 +108,11 @@ const normalizeTags = (value: unknown): string[] => {
 
 const getMimeTypeFromUri = (uri: string): string => {
   const normalized = uri.toLowerCase();
+  if (normalized.endsWith('.pdf')) return 'application/pdf';
+  if (normalized.endsWith('.txt')) return 'text/plain';
+  if (normalized.endsWith('.csv')) return 'text/csv';
+  if (normalized.endsWith('.doc')) return 'application/msword';
+  if (normalized.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   if (normalized.endsWith('.png')) return 'image/png';
   if (normalized.endsWith('.webp')) return 'image/webp';
   if (normalized.endsWith('.heic')) return 'image/heic';
@@ -217,6 +222,7 @@ function dbToProperty(row: any): Property {
     insuranceRenewalDate: row.insurance_renewal_date || undefined,
     insurancePremium: row.insurance_premium ? Number(row.insurance_premium) : undefined,
     propertyTax: row.property_tax ? Number(row.property_tax) : undefined,
+    propertyTaxDueDate: row.property_tax_due_date || undefined,
     appliances: [],
     paintColors: [],
     acCapacitorSize: row.ac_capacitor_size || undefined,
@@ -281,11 +287,11 @@ const TABLE_COLUMN_ALLOWLIST: Record<string, Set<string>> = {
     'id', 'household_id', 'user_id', 'name', 'address', 'type', 'purchase_date', 'purchase_price', 'current_value', 'square_footage',
     'monthly_rent', 'tenant_name', 'tenant_contact', 'lease_start', 'lease_end', 'mortgage_amount', 'mortgage_payment',
     'mortgage_renewal_date', 'insurance_provider', 'insurance_policy', 'insurance_renewal_date', 'insurance_premium',
-    'property_tax', 'ac_capacitor_size', 'ac_filter_size', 'paint_colors_inside', 'paint_colors_outside',
+    'property_tax', 'property_tax_due_date', 'ac_capacitor_size', 'ac_filter_size', 'paint_colors_inside', 'paint_colors_outside',
     'water_heater_info', 'appliance_info', 'notes', 'image_uri', 'background_color', 'custom_fields', 'display_order', 'created_at', 'updated_at'
   ]),
   transactions: new Set([
-    'id', 'user_id', 'household_id', 'property_id', 'type', 'category', 'amount', 'tx_date', 'description', 'receipt_uri', 'tags',
+    'id', 'user_id', 'household_id', 'property_id', 'type', 'category', 'amount', 'tx_date', 'description', 'receipt_uri', 'receipt_name', 'tags',
     'created_at', 'updated_at'
   ]),
   receipts: new Set([
@@ -411,6 +417,7 @@ function dbToTransaction(row: any): Transaction {
     date: row.tx_date || row.date,
     description: row.description,
     receiptUri: row.receipt_uri || undefined,
+    receiptName: row.receipt_name || undefined,
     tags: row.tags || [],
   };
 }
@@ -779,6 +786,7 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
           insurance_renewal_date: prop.insuranceRenewalDate,
           insurance_premium: prop.insurancePremium,
           property_tax: prop.propertyTax,
+          property_tax_due_date: prop.propertyTaxDueDate,
           ac_capacitor_size: prop.acCapacitorSize,
           ac_filter_size: prop.acFilterSize,
           paint_colors_inside: prop.paintColorsInside,
@@ -972,6 +980,7 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       insurance_renewal_date: normalizeOptionalDate(property.insuranceRenewalDate),
       insurance_premium: property.insurancePremium,
       property_tax: property.propertyTax,
+      property_tax_due_date: normalizeOptionalDate(property.propertyTaxDueDate),
       ac_capacitor_size: property.acCapacitorSize,
       ac_filter_size: property.acFilterSize,
       paint_colors_inside: property.paintColorsInside,
@@ -1115,6 +1124,7 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
     if (normalizedUpdates.insuranceRenewalDate !== undefined) updateData.insurance_renewal_date = normalizeOptionalDate(normalizedUpdates.insuranceRenewalDate);
     if (normalizedUpdates.insurancePremium !== undefined) updateData.insurance_premium = normalizedUpdates.insurancePremium;
     if (normalizedUpdates.propertyTax !== undefined) updateData.property_tax = normalizedUpdates.propertyTax;
+    if (normalizedUpdates.propertyTaxDueDate !== undefined) updateData.property_tax_due_date = normalizeOptionalDate(normalizedUpdates.propertyTaxDueDate);
     if (normalizedUpdates.acCapacitorSize !== undefined) updateData.ac_capacitor_size = normalizedUpdates.acCapacitorSize;
     if (normalizedUpdates.acFilterSize !== undefined) updateData.ac_filter_size = normalizedUpdates.acFilterSize;
     if (normalizedUpdates.paintColorsInside !== undefined) updateData.paint_colors_inside = normalizedUpdates.paintColorsInside;
@@ -1225,6 +1235,22 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
     const optimisticTransaction: Transaction = { ...transaction, id: optimisticId };
     setTransactions(prev => [optimisticTransaction, ...prev]);
 
+    let uploadedReceiptUri = transaction.receiptUri;
+    if (transaction.receiptUri) {
+      try {
+        uploadedReceiptUri = await uploadImageToStorage(
+          transaction.receiptUri,
+          [RECEIPT_MEDIA_BUCKET],
+          householdId,
+          'transaction_attachment'
+        );
+      } catch (uploadError) {
+        setTransactions(prev => prev.filter(t => t.id !== optimisticId));
+        console.error('Transaction attachment upload failed:', uploadError);
+        throw new Error('Failed to upload transaction file to cloud storage. Please try again.');
+      }
+    }
+
     const { data, error } = await retryMissingColumnOperation<Transaction>('transactions', {
       id: createInsertId('tx'),
       user_id: user.id,
@@ -1236,7 +1262,8 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
       tx_date: normalizeStoredDate(transaction.date),
       date: normalizeStoredDate(transaction.date),
       description: transaction.description,
-      receipt_uri: transaction.receiptUri,
+      receipt_uri: uploadedReceiptUri,
+      receipt_name: transaction.receiptName,
       tags: transaction.tags,
     }, 'insert');
     if (error) {
@@ -1273,6 +1300,7 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
     }
     if (updates.description !== undefined) updateData.description = updates.description;
     if (updates.receiptUri !== undefined) updateData.receipt_uri = updates.receiptUri;
+    if (updates.receiptName !== undefined) updateData.receipt_name = updates.receiptName;
     if (updates.tags !== undefined) updateData.tags = updates.tags;
     if (updates.propertyId !== undefined) updateData.property_id = updates.propertyId;
 
@@ -1809,7 +1837,21 @@ export const [PortfolioProvider, usePortfolio] = createContextHook(() => {
     };
     setLeaseDocuments(prev => prev.some(d => d.id === optimisticId) ? prev : [optimisticDocument, ...prev]);
 
-    const savedOriginalImageUri = document.originalImageUri;
+    let savedOriginalImageUri = document.originalImageUri;
+    if (document.originalImageUri) {
+      try {
+        savedOriginalImageUri = await uploadImageToStorage(
+          document.originalImageUri,
+          [LEASE_MEDIA_BUCKET],
+          householdId,
+          'lease_document'
+        );
+      } catch (uploadError) {
+        setLeaseDocuments(prev => prev.filter(d => d.id !== optimisticId));
+        console.error('Lease document upload failed:', uploadError);
+        throw new Error('Failed to upload lease document to cloud storage. Please try again.');
+      }
+    }
 
     const { data, error } = await retryMissingColumnOperation<LeaseDocument>('lease_documents', {
       user_id: user.id,

@@ -104,11 +104,6 @@ export default function CreateLeaseDocumentScreen() {
       return;
     }
 
-    if (!content.trim()) {
-      Alert.alert('Error', 'Please enter document content.');
-      return;
-    }
-
     if (!selectedProperty) {
       Alert.alert('Error', 'Please select a property.');
       return;
@@ -126,7 +121,7 @@ export default function CreateLeaseDocumentScreen() {
         propertyId: selectedProperty,
         type: documentType,
         title: title.trim(),
-        content: content.trim(),
+        content: content.trim() || 'Uploaded file attached.',
         originalImageUri: uploadedDocumentUri || undefined,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -177,7 +172,7 @@ export default function CreateLeaseDocumentScreen() {
     }
   };
 
-  const canSave = title.trim() && content.trim() && selectedProperty && selectedFolder;
+  const canSave = title.trim() && (content.trim() || uploadedDocumentUri) && selectedProperty && selectedFolder;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -395,12 +390,12 @@ export default function CreateLeaseDocumentScreen() {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Document Content *</Text>
+            <Text style={styles.inputLabel}>Document Content</Text>
             <TextInput
               style={[styles.textInput, styles.contentTextArea]}
               value={content}
               onChangeText={setContent}
-              placeholder="Enter the document content here..."
+              placeholder="Enter document notes or extracted text here..."
               multiline
               numberOfLines={10}
               textAlignVertical="top"
@@ -547,6 +542,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     marginBottom: 8,
+  },
+  uploadButton: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1.5,
+    borderColor: '#BFDBFE',
+    borderStyle: 'dashed' as const,
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uploadButtonText: {
+    color: '#2563EB',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  uploadHint: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#059669',
+    fontWeight: '500',
   },
   textInput: {
     borderWidth: 1,

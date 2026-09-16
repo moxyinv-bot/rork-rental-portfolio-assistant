@@ -16,9 +16,14 @@ interface AuthContextType {
   isLoading: boolean;
   isSigningIn: boolean;
   error: string | null;
+  message: string | null;
   signIn: (provider: "google" | "apple") => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (email: string, password: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
   clearError: () => void;
+  clearMessage: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -28,8 +33,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   const clearError = useCallback(() => setError(null), []);
+  const clearMessage = useCallback(() => setMessage(null), []);
 
   useEffect(() => {
     checkAuth();
@@ -89,6 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signIn(provider: "google" | "apple") {
     setIsSigningIn(true);
     setError(null);
+    setMessage(null);
     try {
       const redirectTo = Linking.createURL("auth/callback");
       const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
@@ -135,13 +143,111 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function signInWithEmail(email: string, password: string) {
+    setIsSigningIn(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const cleanedEmail = email.trim();
+      if (!cleanedEmail || !password) {
+        throw new Error("Email and password are required.");
+      }
+
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: cleanedEmail,
+        password,
+      });
+
+      if (signInError) throw signInError;
+    } catch (err) {
+      console.error("Email sign in failed:", err);
+      setError(err instanceof Error ? err.message : "Email sign in failed");
+    } finally {
+      setIsSigningIn(false);
+    }
+  }
+
+  async function signUpWithEmail(email: string, password: string) {
+    setIsSigningIn(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const cleanedEmail = email.trim();
+      if (!cleanedEmail || !password) {
+        throw new Error("Email and password are required.");
+      }
+
+      const redirectTo = Linking.createURL("auth/callback");
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: cleanedEmail,
+        password,
+        options: {
+          emailRedirectTo: redirectTo,
+        },
+      });
+
+      if (signUpError) throw signUpError;
+      if (!data.user) {
+        throw new Error("Account could not be created.");
+      }
+
+      setMessage("Account created. Check your email for a verification link before signing in.");
+    } catch (err) {
+      console.error("Email sign up failed:", err);
+      setError(err instanceof Error ? err.message : "Email sign up failed");
+    } finally {
+      setIsSigningIn(false);
+    }
+  }
+
+  async function resetPassword(email: string) {
+    setIsSigningIn(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const cleanedEmail = email.trim();
+      if (!cleanedEmail) {
+        throw new Error("Enter an email address to reset your password.");
+      }
+
+      const redirectTo = Linking.createURL("auth/callback");
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(cleanedEmail, {
+        redirectTo,
+      });
+
+      if (resetError) throw resetError;
+      setMessage("Password reset email sent. Check your inbox and follow the link to continue.");
+    } catch (err) {
+      console.error("Password reset failed:", err);
+      setError(err instanceof Error ? err.message : "Password reset failed");
+    } finally {
+      setIsSigningIn(false);
+    }
+  }
+
   async function signOut() {
     const { error: signOutError } = await supabase.auth.signOut();
     if (signOutError) throw signOutError;
   }
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, isSigningIn, error, signIn, signOut, clearError }}>
+    <AuthContext.Provider value={{
+      user,
+      isLoading,
+      isSigningIn,
+      error,
+      message,
+      signIn,
+      signInWithEmail,
+      signUpWithEmail,
+      resetPassword,
+      signOut,
+      clearError,
+      clearMessage,
+    }}>
       {children}
     </AuthContext.Provider>
   );

@@ -15,7 +15,8 @@ import { router } from "expo-router";
 import { usePortfolio } from "@/hooks/portfolio-store";
 import { Transaction } from "@/types/property";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from "@/constants/categories";
-import { DollarSign, Tag, ChevronDown, Calendar } from "lucide-react-native";
+import { DollarSign, Tag, ChevronDown, Calendar, Upload } from "lucide-react-native";
+import * as DocumentPicker from 'expo-document-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toStoredDate, formatDisplayDate } from "@/lib/dates";
@@ -36,6 +37,8 @@ export default function AddTransactionScreen() {
     amount: "",
     date: formatDate(new Date()),
     description: "",
+    receiptUri: "",
+    receiptName: "",
     tags: "" as string,
   });
 
@@ -83,6 +86,8 @@ export default function AddTransactionScreen() {
         amount: parseFloat(formData.amount) || 0,
         date: formData.date,
         description: formData.description.trim() || 'No description provided',
+        receiptUri: formData.receiptUri || undefined,
+        receiptName: formData.receiptName || undefined,
         tags: formData.tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0),
       };
 
@@ -101,6 +106,23 @@ export default function AddTransactionScreen() {
 
   const getSelectedProperty = () => {
     return properties.find(p => p.id === formData.propertyId);
+  };
+
+  const pickDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/*', 'text/*', 'text/csv', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+      const file = result.assets[0];
+      setFormData({ ...formData, receiptUri: file.uri, receiptName: file.name || file.uri.split('/').pop() || 'Attached file' });
+    } catch (error) {
+      console.error('Error picking transaction document:', error);
+      Alert.alert('Upload failed', 'Please try again or choose a different file.');
+    }
   };
 
   return (
@@ -216,6 +238,17 @@ export default function AddTransactionScreen() {
               <Calendar size={20} color="#6B7280" />
               <Text style={styles.dateButtonText}>{formatDisplayDate(formData.date)}</Text>
             </TouchableOpacity>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.label}>Receipt or File</Text>
+            <TouchableOpacity style={styles.uploadButton} onPress={pickDocument}>
+              <Upload size={20} color="#6B7280" />
+              <Text style={styles.uploadButtonText}>{formData.receiptUri ? 'Replace Uploaded File' : 'Upload from Device or Drive'}</Text>
+            </TouchableOpacity>
+            {formData.receiptUri ? (
+              <Text style={styles.uploadHint}>Attached: {formData.receiptName || formData.receiptUri.split('/').pop()}</Text>
+            ) : null}
           </View>
 
           {/* Tags */}
@@ -498,6 +531,27 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 12,
     fontSize: 16,
+  },
+  uploadButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    borderRadius: 8,
+    padding: 12,
+    gap: 8,
+  },
+  uploadButtonText: {
+    fontSize: 16,
+    color: "#374151",
+    fontWeight: "500" as const,
+  },
+  uploadHint: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginTop: 8,
   },
   actions: {
     flexDirection: "row",

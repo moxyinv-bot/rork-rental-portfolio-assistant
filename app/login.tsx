@@ -1,84 +1,220 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import {
   StyleSheet,
   Text,
   View,
   TouchableOpacity,
   ActivityIndicator,
+  TextInput,
+  ScrollView,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "@/hooks/useAuth";
 import { Building2 } from "lucide-react-native";
 
 export default function LoginScreen() {
-  const { isSigningIn, error, signIn, clearError } = useAuth();
+  const {
+    isSigningIn,
+    error,
+    message,
+    signIn,
+    signInWithEmail,
+    signUpWithEmail,
+    resetPassword,
+    clearError,
+    clearMessage,
+  } = useAuth();
+
+  const [mode, setMode] = useState<"signIn" | "signUp">("signIn");
+  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
+  const submitLabel = useMemo(
+    () => (mode === "signIn" ? "Sign in with email" : "Create account"),
+    [mode]
+  );
+
+  const handleEmailSubmit = async () => {
+    if (mode === "signUp") {
+      if (!email.trim() || !password) {
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        return;
+      }
+
+      await signUpWithEmail(email, password);
+      return;
+    }
+
+    await signInWithEmail(email, password);
+  };
+
+  const handleResetPassword = async () => {
+    if (!email.trim()) {
+      return;
+    }
+
+    await resetPassword(email);
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
-      <View style={styles.content}>
-        {/* Logo / Brand */}
-        <View style={styles.brandSection}>
-          <View style={styles.logoCircle}>
-            <Building2 size={48} color="#FFFFFF" />
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.content}>
+          <View style={styles.brandSection}>
+            <View style={styles.logoCircle}>
+              <Building2 size={48} color="#FFFFFF" />
+            </View>
+            <Text style={styles.appName}>PadCommand</Text>
+            <Text style={styles.tagline}>
+              Meet PadCommand - your command center for managing everything you own.
+            </Text>
           </View>
-          <Text style={styles.appName}>PadCommand</Text>
-          <Text style={styles.tagline}>
-            Meet PadCommand - your command center for managing everything you own.
-          </Text>
-        </View>
 
-        {/* Features */}
-        <View style={styles.featuresSection}>
-          <View style={styles.featureRow}>
-            <View style={styles.featureDot} />
-            <Text style={styles.featureText}>Track income & expenses</Text>
+          <View style={styles.featuresSection}>
+            <View style={styles.featureRow}>
+              <View style={styles.featureDot} />
+              <Text style={styles.featureText}>Track income & expenses</Text>
+            </View>
+            <View style={styles.featureRow}>
+              <View style={styles.featureDot} />
+              <Text style={styles.featureText}>Share with family members</Text>
+            </View>
+            <View style={styles.featureRow}>
+              <View style={styles.featureDot} />
+              <Text style={styles.featureText}>Real-time cloud sync</Text>
+            </View>
+            <View style={styles.featureRow}>
+              <View style={styles.featureDot} />
+              <Text style={styles.featureText}>Lease & document management</Text>
+            </View>
           </View>
-          <View style={styles.featureRow}>
-            <View style={styles.featureDot} />
-            <Text style={styles.featureText}>Share with family members</Text>
-          </View>
-          <View style={styles.featureRow}>
-            <View style={styles.featureDot} />
-            <Text style={styles.featureText}>Real-time cloud sync</Text>
-          </View>
-          <View style={styles.featureRow}>
-            <View style={styles.featureDot} />
-            <Text style={styles.featureText}>Lease & document management</Text>
-          </View>
-        </View>
 
-        {/* Error */}
-        {error && (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>{error}</Text>
-            <TouchableOpacity onPress={clearError}>
-              <Text style={styles.errorDismiss}>Dismiss</Text>
+          <View style={styles.buttonStack}>
+            <TouchableOpacity
+              style={[styles.googleButton, isSigningIn && styles.buttonDisabled]}
+              onPress={() => signIn("google")}
+              disabled={isSigningIn}
+              activeOpacity={0.8}
+            >
+              <GoogleIcon />
+              <Text style={styles.googleButtonText}>Continue with Google</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.secondaryButton, isSigningIn && styles.buttonDisabled]}
+              onPress={() => setShowEmailForm((value) => !value)}
+              disabled={isSigningIn}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.secondaryButtonText}>Log in with another email</Text>
             </TouchableOpacity>
           </View>
-        )}
 
-        {/* Sign in buttons */}
-        <View style={styles.buttonContainer}>
-          {isSigningIn && (
-            <ActivityIndicator size="large" color="#3B82F6" style={{ marginBottom: 16 }} />
+          {error && (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity onPress={clearError}>
+                <Text style={styles.errorDismiss}>Dismiss</Text>
+              </TouchableOpacity>
+            </View>
           )}
 
-          <TouchableOpacity
-            style={[styles.googleButton, isSigningIn && styles.buttonDisabled]}
-            onPress={() => signIn("google")}
-            disabled={isSigningIn}
-            activeOpacity={0.8}
-          >
-            <GoogleIcon />
-            <Text style={styles.googleButtonText}>Continue with Google</Text>
-          </TouchableOpacity>
+          {message && (
+            <View style={styles.successContainer}>
+              <Text style={styles.successText}>{message}</Text>
+              <TouchableOpacity onPress={clearMessage}>
+                <Text style={styles.successDismiss}>Dismiss</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
+          {showEmailForm && (
+            <View style={styles.authCard}>
+              <View style={styles.modeToggleRow}>
+                <TouchableOpacity
+                  style={[styles.modeToggle, mode === "signIn" && styles.modeToggleActive]}
+                  onPress={() => setMode("signIn")}
+                >
+                  <Text style={[styles.modeToggleText, mode === "signIn" && styles.modeToggleTextActive]}>
+                    Sign in
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modeToggle, mode === "signUp" && styles.modeToggleActive]}
+                  onPress={() => setMode("signUp")}
+                >
+                  <Text style={[styles.modeToggleText, mode === "signUp" && styles.modeToggleTextActive]}>
+                    Create account
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <TextInput
+                style={styles.input}
+                value={email}
+                onChangeText={setEmail}
+                placeholder="Email"
+                placeholderTextColor="#64748B"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TextInput
+                style={styles.input}
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Password"
+                placeholderTextColor="#64748B"
+                secureTextEntry
+              />
+
+              {mode === "signUp" && (
+                <TextInput
+                  style={styles.input}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  placeholder="Confirm password"
+                  placeholderTextColor="#64748B"
+                  secureTextEntry
+                />
+              )}
+
+              {mode === "signIn" && (
+                <TouchableOpacity onPress={handleResetPassword} disabled={isSigningIn}>
+                  <Text style={styles.linkText}>Forgot password?</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity
+                style={[styles.primaryButton, isSigningIn && styles.buttonDisabled]}
+                onPress={handleEmailSubmit}
+                disabled={isSigningIn}
+                activeOpacity={0.8}
+              >
+                {isSigningIn ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>{submitLabel}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <Text style={styles.footerText}>
+            By signing in, you agree to sync your PadCommand data across your devices.
+          </Text>
         </View>
-
-        <Text style={styles.footerText}>
-          By signing in, you agree to sync your PadCommand data across your devices.
-        </Text>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -96,11 +232,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#0F172A",
   },
-  content: {
+  scrollView: {
     flex: 1,
-    justifyContent: "space-between",
+  },
+  scrollContent: {
     paddingHorizontal: 24,
-    paddingVertical: 48,
+    paddingTop: 20,
+    paddingBottom: 32,
+  },
+  content: {
+    flexGrow: 1,
   },
   brandSection: {
     alignItems: "center",
@@ -173,6 +314,110 @@ const styles = StyleSheet.create({
     fontWeight: "600" as const,
     marginLeft: 8,
   },
+  successContainer: {
+    backgroundColor: "rgba(34, 197, 94, 0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(34, 197, 94, 0.3)",
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  successText: {
+    color: "#BBF7D0",
+    fontSize: 14,
+    flex: 1,
+  },
+  successDismiss: {
+    color: "#BBF7D0",
+    fontWeight: "600" as const,
+    marginLeft: 8,
+  },
+  authCard: {
+    backgroundColor: "rgba(15, 23, 42, 0.7)",
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.2)",
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 16,
+  },
+  modeToggleRow: {
+    flexDirection: "row",
+    backgroundColor: "rgba(30, 41, 59, 0.9)",
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 16,
+  },
+  modeToggle: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  modeToggleActive: {
+    backgroundColor: "#3B82F6",
+  },
+  modeToggleText: {
+    color: "#CBD5E1",
+    fontSize: 14,
+    fontWeight: "600" as const,
+  },
+  modeToggleTextActive: {
+    color: "#FFFFFF",
+  },
+  input: {
+    backgroundColor: "rgba(15, 23, 42, 0.9)",
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.25)",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: "#F8FAFC",
+    fontSize: 16,
+    marginBottom: 12,
+  },
+  linkText: {
+    color: "#7DD3FC",
+    fontSize: 14,
+    fontWeight: "600" as const,
+    marginBottom: 12,
+    alignSelf: "flex-end",
+  },
+  secondaryButton: {
+    backgroundColor: "rgba(59, 130, 246, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(96, 165, 250, 0.45)",
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+  },
+  secondaryButtonText: {
+    color: "#BFDBFE",
+    fontSize: 16,
+    fontWeight: "600" as const,
+  },
+  primaryButton: {
+    backgroundColor: "#3B82F6",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  primaryButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700" as const,
+  },
+  buttonStack: {
+    gap: 12,
+    marginBottom: 16,
+    width: "100%",
+  },
   buttonContainer: {
     gap: 12,
   },
@@ -185,6 +430,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 16,
     borderRadius: 14,
+    width: "100%",
   },
   googleButtonText: {
     color: "#1E293B",

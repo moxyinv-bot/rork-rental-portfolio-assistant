@@ -12,17 +12,17 @@ import {
   Keyboard,
 } from "react-native";
 import { router } from "expo-router";
-import * as Calendar from 'expo-calendar';
 import { usePortfolio } from "@/hooks/portfolio-store";
 import { CustomPropertyField, Property } from "@/types/property";
 import { PROPERTY_TYPES, PROPERTY_BACKGROUND_COLORS } from "@/constants/categories";
 import * as ImagePicker from "expo-image-picker";
-import { Camera, Calendar, Plus, Trash2 } from "lucide-react-native";
+import { Camera, Calendar as CalendarIcon, Plus, Trash2 } from "lucide-react-native";
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from "react-native-safe-area-context";
 import { toStoredDate, formatDisplayDate } from "@/lib/dates";
 
 const MAX_CUSTOM_FIELDS = 10;
+type PropertyDateField = "purchaseDate" | "mortgageRenewalDate" | "insuranceRenewalDate" | "leaseStart" | "leaseEnd" | "propertyTaxDueDate";
 
 const createCustomField = (): CustomPropertyField => ({
   id: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -41,11 +41,13 @@ export default function AddPropertyScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [activeDateField, setActiveDateField] = useState<PropertyDateField>("purchaseDate");
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [autoRenewalOptions, setAutoRenewalOptions] = useState({
     mortgage: false,
     insurance: false,
     lease: false,
+    propertyTax: false,
   });
 
   const formatDate = toStoredDate;
@@ -71,6 +73,7 @@ export default function AddPropertyScreen() {
     insuranceRenewalDate: "",
     insurancePremium: "",
     propertyTax: "",
+    propertyTaxDueDate: "",
     acCapacitorSize: "",
     acFilterSize: "",
     paintColorsInside: "",
@@ -151,6 +154,7 @@ export default function AddPropertyScreen() {
         insuranceRenewalDate: formData.insuranceRenewalDate || undefined,
         insurancePremium: formData.insurancePremium ? parseFloat(formData.insurancePremium) : undefined,
         propertyTax: formData.propertyTax ? parseFloat(formData.propertyTax) : undefined,
+        propertyTaxDueDate: formData.propertyTaxDueDate || undefined,
         acCapacitorSize: formData.acCapacitorSize || undefined,
         acFilterSize: formData.acFilterSize || undefined,
         paintColorsInside: formData.paintColorsInside || undefined,
@@ -171,14 +175,24 @@ export default function AddPropertyScreen() {
         throw new Error('Property save did not return a valid record.');
       }
 
+      const reminderResults: boolean[] = [];
       if (autoRenewalOptions.mortgage && savedProperty.mortgageRenewalDate) {
-        await createRenewalReminder('mortgage', savedProperty.mortgageRenewalDate, savedProperty.name, savedProperty.id);
+        reminderResults.push(await createRenewalReminder('mortgage', savedProperty.mortgageRenewalDate, savedProperty.name, savedProperty.id));
       }
       if (autoRenewalOptions.insurance && savedProperty.insuranceRenewalDate) {
-        await createRenewalReminder('insurance', savedProperty.insuranceRenewalDate, savedProperty.name, savedProperty.id);
+        reminderResults.push(await createRenewalReminder('insurance', savedProperty.insuranceRenewalDate, savedProperty.name, savedProperty.id));
       }
       if (autoRenewalOptions.lease && savedProperty.leaseEnd) {
-        await createRenewalReminder('lease', savedProperty.leaseEnd, savedProperty.name, savedProperty.id);
+        reminderResults.push(await createRenewalReminder('lease', savedProperty.leaseEnd, savedProperty.name, savedProperty.id));
+      }
+      if (autoRenewalOptions.propertyTax && savedProperty.propertyTaxDueDate) {
+        reminderResults.push(await createRenewalReminder('propertyTax', savedProperty.propertyTaxDueDate, savedProperty.name, savedProperty.id));
+      }
+
+      const failedReminderCount = reminderResults.filter(result => !result).length;
+      if (failedReminderCount > 0) {
+        Alert.alert('Property saved', `${failedReminderCount} reminder(s) could not be created. Please try adding them from the Reminders tab.`);
+        return;
       }
 
       Alert.alert('Success', 'Property saved successfully!');
@@ -193,20 +207,21 @@ export default function AddPropertyScreen() {
   };
 
   const createRenewalReminder = async (
-    type: 'mortgage' | 'insurance' | 'lease',
+    type: 'mortgage' | 'insurance' | 'lease' | 'propertyTax',
     renewalDate: string,
     propertyName: string,
     propertyId: string,
-  ) => {
+  ): Promise<boolean> => {
     try {
-      if (!renewalDate || !propertyId) return;
+      if (!renewalDate || !propertyId) return false;
       const due = new Date(renewalDate);
-      if (Number.isNaN(due.getTime())) return;
+      if (Number.isNaN(due.getTime())) return false;
 
       const titleMap = {
         mortgage: `Mortgage renewal for ${propertyName}`,
         insurance: `Insurance renewal for ${propertyName}`,
         lease: `Lease renewal for ${propertyName}`,
+        propertyTax: `Property tax due for ${propertyName}`,
       } as const;
 
       const reminderDate = new Date(due);
@@ -215,39 +230,25 @@ export default function AddPropertyScreen() {
       await addReminder({
         id: `renewal_${type}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         propertyId,
-        type,
+        type: type === 'propertyTax' ? 'other' : type,
         title: titleMap[type],
         dueDate: toStoredDate(reminderDate),
         notes: 'Auto-created yearly renewal reminder.',
         completed: false,
       });
 
-      const { status } = await Calendar.requestCalendarPermissionsAsync();
-      if (status !== 'granted') return;
-
-      const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
-      const defaultCalendar = calendars.find(calendar => calendar.allowsModifications) || calendars[0];
-      if (!defaultCalendar) return;
-
-      const nextYearEvent = new Date(due);
-      nextYearEvent.setFullYear(nextYearEvent.getFullYear() + 1);
-
-      await Calendar.createEventAsync(defaultCalendar.id, {
-        title: titleMap[type],
-        startDate: nextYearEvent,
-        endDate: new Date(nextYearEvent.getTime() + 60 * 60 * 1000),
-        timeZone: 'UTC',
-        notes: `Yearly renewal reminder for ${propertyName}`,
-        location: propertyName,
-        recurrenceRule: {
-          frequency: 'YEARLY',
-          interval: 1,
-          occurrence: 1,
-        },
-      });
+      return true;
     } catch (error) {
       console.warn('Failed to create yearly renewal reminder:', error);
+      return false;
     }
+  };
+
+  const openDatePicker = (field: PropertyDateField) => {
+    const currentDate = formData[field] ? new Date(formData[field]) : new Date();
+    setActiveDateField(field);
+    setSelectedDate(Number.isNaN(currentDate.getTime()) ? new Date() : currentDate);
+    setShowDatePicker(true);
   };
 
   const pickImage = async () => {
@@ -385,9 +386,9 @@ export default function AddPropertyScreen() {
             <Text style={styles.label}>Purchase Date</Text>
             <TouchableOpacity
               style={styles.dateButton}
-              onPress={() => setShowDatePicker(true)}
+              onPress={() => openDatePicker("purchaseDate")}
             >
-              <Calendar size={20} color="#6B7280" />
+              <CalendarIcon size={20} color="#6B7280" />
               <Text style={styles.dateButtonText}>{formatDisplayDate(formData.purchaseDate)}</Text>
             </TouchableOpacity>
             
@@ -441,6 +442,25 @@ export default function AddPropertyScreen() {
               placeholder="3500"
               keyboardType="decimal-pad"
             />
+
+            <Text style={styles.label}>Property Tax Due Date</Text>
+            <TouchableOpacity
+              style={styles.dateButton}
+              onPress={() => openDatePicker("propertyTaxDueDate")}
+            >
+              <CalendarIcon size={20} color="#6B7280" />
+              <Text style={styles.dateButtonText}>{formData.propertyTaxDueDate ? formatDisplayDate(formData.propertyTaxDueDate) : "Select date"}</Text>
+            </TouchableOpacity>
+            {formData.propertyTaxDueDate ? (
+              <TouchableOpacity
+                style={[styles.reminderToggle, autoRenewalOptions.propertyTax && styles.reminderToggleActive]}
+                onPress={() => setAutoRenewalOptions({ ...autoRenewalOptions, propertyTax: !autoRenewalOptions.propertyTax })}
+              >
+                <Text style={[styles.reminderToggleText, autoRenewalOptions.propertyTax && styles.reminderToggleTextActive]}>
+                  {autoRenewalOptions.propertyTax ? 'Auto reminder on' : 'Create yearly reminder'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {/* Mortgage Information */}
@@ -474,20 +494,23 @@ export default function AddPropertyScreen() {
             />
             
             <Text style={styles.label}>Renewal Date</Text>
-            <TextInput
-              style={styles.input}
-              value={formData.mortgageRenewalDate}
-              onChangeText={(text) => setFormData({ ...formData, mortgageRenewalDate: text })}
-              placeholder="YYYY-MM-DD"
-            />
             <TouchableOpacity
-              style={[styles.reminderToggle, autoRenewalOptions.mortgage && styles.reminderToggleActive]}
-              onPress={() => setAutoRenewalOptions({ ...autoRenewalOptions, mortgage: !autoRenewalOptions.mortgage })}
+              style={styles.dateButton}
+              onPress={() => openDatePicker("mortgageRenewalDate")}
             >
-              <Text style={[styles.reminderToggleText, autoRenewalOptions.mortgage && styles.reminderToggleTextActive]}>
-                {autoRenewalOptions.mortgage ? 'Auto reminder on' : 'Create yearly reminder'}
-              </Text>
+              <CalendarIcon size={20} color="#6B7280" />
+              <Text style={styles.dateButtonText}>{formData.mortgageRenewalDate ? formatDisplayDate(formData.mortgageRenewalDate) : "Select date"}</Text>
             </TouchableOpacity>
+            {formData.mortgageRenewalDate ? (
+              <TouchableOpacity
+                style={[styles.reminderToggle, autoRenewalOptions.mortgage && styles.reminderToggleActive]}
+                onPress={() => setAutoRenewalOptions({ ...autoRenewalOptions, mortgage: !autoRenewalOptions.mortgage })}
+              >
+                <Text style={[styles.reminderToggleText, autoRenewalOptions.mortgage && styles.reminderToggleTextActive]}>
+                  {autoRenewalOptions.mortgage ? 'Auto reminder on' : 'Create yearly reminder'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {/* Insurance Information */}
@@ -524,20 +547,23 @@ export default function AddPropertyScreen() {
             />
             
             <Text style={styles.label}>Renewal Date</Text>
-            <TextInput
-              style={styles.input}
-              value={formData.insuranceRenewalDate}
-              onChangeText={(text) => setFormData({ ...formData, insuranceRenewalDate: text })}
-              placeholder="YYYY-MM-DD"
-            />
             <TouchableOpacity
-              style={[styles.reminderToggle, autoRenewalOptions.insurance && styles.reminderToggleActive]}
-              onPress={() => setAutoRenewalOptions({ ...autoRenewalOptions, insurance: !autoRenewalOptions.insurance })}
+              style={styles.dateButton}
+              onPress={() => openDatePicker("insuranceRenewalDate")}
             >
-              <Text style={[styles.reminderToggleText, autoRenewalOptions.insurance && styles.reminderToggleTextActive]}>
-                {autoRenewalOptions.insurance ? 'Auto reminder on' : 'Create yearly reminder'}
-              </Text>
+              <CalendarIcon size={20} color="#6B7280" />
+              <Text style={styles.dateButtonText}>{formData.insuranceRenewalDate ? formatDisplayDate(formData.insuranceRenewalDate) : "Select date"}</Text>
             </TouchableOpacity>
+            {formData.insuranceRenewalDate ? (
+              <TouchableOpacity
+                style={[styles.reminderToggle, autoRenewalOptions.insurance && styles.reminderToggleActive]}
+                onPress={() => setAutoRenewalOptions({ ...autoRenewalOptions, insurance: !autoRenewalOptions.insurance })}
+              >
+                <Text style={[styles.reminderToggleText, autoRenewalOptions.insurance && styles.reminderToggleTextActive]}>
+                  {autoRenewalOptions.insurance ? 'Auto reminder on' : 'Create yearly reminder'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {/* Tenant Information */}
@@ -561,28 +587,32 @@ export default function AddPropertyScreen() {
             />
             
             <Text style={styles.label}>Lease Start</Text>
-            <TextInput
-              style={styles.input}
-              value={formData.leaseStart}
-              onChangeText={(text) => setFormData({ ...formData, leaseStart: text })}
-              placeholder="mm-dd-yy"
-            />
+            <TouchableOpacity
+              style={styles.dateButton}
+              onPress={() => openDatePicker("leaseStart")}
+            >
+              <CalendarIcon size={20} color="#6B7280" />
+              <Text style={styles.dateButtonText}>{formData.leaseStart ? formatDisplayDate(formData.leaseStart) : "Select date"}</Text>
+            </TouchableOpacity>
             
             <Text style={styles.label}>Lease End</Text>
-            <TextInput
-              style={styles.input}
-              value={formData.leaseEnd}
-              onChangeText={(text) => setFormData({ ...formData, leaseEnd: text })}
-              placeholder="YYYY-MM-DD"
-            />
             <TouchableOpacity
-              style={[styles.reminderToggle, autoRenewalOptions.lease && styles.reminderToggleActive]}
-              onPress={() => setAutoRenewalOptions({ ...autoRenewalOptions, lease: !autoRenewalOptions.lease })}
+              style={styles.dateButton}
+              onPress={() => openDatePicker("leaseEnd")}
             >
-              <Text style={[styles.reminderToggleText, autoRenewalOptions.lease && styles.reminderToggleTextActive]}>
-                {autoRenewalOptions.lease ? 'Auto reminder on' : 'Create yearly reminder'}
-              </Text>
+              <CalendarIcon size={20} color="#6B7280" />
+              <Text style={styles.dateButtonText}>{formData.leaseEnd ? formatDisplayDate(formData.leaseEnd) : "Select date"}</Text>
             </TouchableOpacity>
+            {formData.leaseEnd ? (
+              <TouchableOpacity
+                style={[styles.reminderToggle, autoRenewalOptions.lease && styles.reminderToggleActive]}
+                onPress={() => setAutoRenewalOptions({ ...autoRenewalOptions, lease: !autoRenewalOptions.lease })}
+              >
+                <Text style={[styles.reminderToggleText, autoRenewalOptions.lease && styles.reminderToggleTextActive]}>
+                  {autoRenewalOptions.lease ? 'Auto reminder on' : 'Create yearly reminder'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {/* Property Details */}
@@ -720,7 +750,7 @@ export default function AddPropertyScreen() {
             setShowDatePicker(Platform.OS === 'ios');
             if (date) {
               setSelectedDate(date);
-              setFormData({ ...formData, purchaseDate: formatDate(date) });
+              setFormData({ ...formData, [activeDateField]: formatDate(date) });
             }
           }}
         />

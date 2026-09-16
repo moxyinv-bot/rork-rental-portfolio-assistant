@@ -1,14 +1,16 @@
 {
   "name": "expo-app",
   "main": "expo-router/entry",
-  "version": "1.0.5",
+  "version": "1.0.20",
   "scripts": {
     "start": "bunx rork start -p 7qnyyg8myr2908b1ajb2f",
     "start-web": "bunx rork start -p 7qnyyg8myr2908b1ajb2f --web",
     "start-web-dev": "DEBUG=expo* bunx rork start -p 7qnyyg8myr2908b1ajb2f --web",
     "lint": "expo lint",
     "bump:android": "node scripts/bump-android-version.js",
-    "android": "expo run:android",
+    "android:dev": "expo run:android",
+    "android:build": "node scripts/build-standalone-android.js",
+    "android:bundle": "node scripts/build-standalone-android.js --bundle",
     "ios": "expo run:ios"
   },
   "dependencies": {

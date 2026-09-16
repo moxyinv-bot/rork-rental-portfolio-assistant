@@ -8,7 +8,10 @@ import {
   TextInput,
   Alert,
   Platform,
-  ActivityIndicator
+  ActivityIndicator,
+  Modal,
+  Image,
+  Dimensions,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
@@ -25,8 +28,16 @@ import {
   Folder,
   Home,
   X,
-  Check
+  Check,
+  Eye,
+  Share2,
+  ExternalLink,
+  Printer,
+  FileCheck
 } from 'lucide-react-native';
+import * as Sharing from 'expo-sharing';
+import * as WebBrowser from 'expo-web-browser';
+import * as FileSystem from 'expo-file-system/legacy';
 import { usePortfolio } from '@/hooks/portfolio-store';
 import { LeaseDocument } from '@/types/property';
 
@@ -61,6 +72,8 @@ export default function LeaseDocumentScreen() {
   
   const [isEditing, setIsEditing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [isPreparingFile, setIsPreparingFile] = useState(false);
   
   // Edit form state
   const [editTitle, setEditTitle] = useState(document?.title || '');
@@ -72,93 +85,114 @@ export default function LeaseDocumentScreen() {
   const [editTags, setEditTags] = useState(document?.tags.join(', ') || '');
   const [editNotes, setEditNotes] = useState(document?.notes || '');
 
-  const handleEdit = () => {
-    if (!document) return;
-    
-    setEditTitle(document.title);
-    setEditContent(document.content);
-    setEditType(document.type);
-    setEditTenantName(document.tenantName || '');
-    setEditDocumentDate(document.dateOfDocument || '');
-    setEditTags(document.tags.join(', '));
-    setEditNotes(document.notes || '');
-    setIsEditing(true);
+  const isImageFile = (uri?: string) => {
+    if (!uri) return false;
+    const clean = uri.split('?')[0].split('#')[0].toLowerCase();
+    return clean.endsWith('.png') || clean.endsWith('.jpg') || clean.endsWith('.jpeg') || clean.endsWith('.webp') || clean.endsWith('.heic') || clean.endsWith('.gif');
   };
 
-  const handleSave = async () => {
-    if (!document) return;
-    
-    if (!editTitle.trim()) {
-      Alert.alert('Error', 'Please enter a document title.');
-      return;
-    }
-    
-    if (!editContent.trim()) {
-      Alert.alert('Error', 'Please enter document content.');
-      return;
-    }
+  const isPdfFile = (uri?: string) => {
+    if (!uri) return false;
+    const clean = uri.split('?')[0].split('#')[0].toLowerCase();
+    return clean.endsWith('.pdf');
+  };
 
-    const updates = {
-      title: editTitle.trim(),
-      content: editContent.trim(),
-      type: editType,
-      tenantName: editTenantName.trim() || undefined,
-      dateOfDocument: editDocumentDate || undefined,
-      tags: editTags.split(',').map(tag => tag.trim()).filter(tag => tag),
-      notes: editNotes.trim() || undefined
-    };
+  const getMimeType = (uri: string) => {
+    const clean = uri.split('?')[0].split('#')[0].toLowerCase();
+    if (clean.endsWith('.pdf')) return 'application/pdf';
+    if (clean.endsWith('.png')) return 'image/png';
+    if (clean.endsWith('.webp')) return 'image/webp';
+    if (clean.endsWith('.heic')) return 'image/heic';
+    if (clean.endsWith('.jpg') || clean.endsWith('.jpeg')) return 'image/jpeg';
+    if (clean.endsWith('.txt')) return 'text/plain';
+    if (clean.endsWith('.csv')) return 'text/csv';
+    if (clean.endsWith('.doc')) return 'application/msword';
+    if (clean.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    return 'application/octet-stream';
+  };
 
+  const getCleanFileName = (uri: string, title?: string) => {
+    const lastPart = uri.split('?')[0].split('#')[0].split('/').pop();
+    if (lastPart && lastPart.length < 40) return lastPart;
+    if (title) {
+      const ext = uri.split('?')[0].split('.').pop() || 'file';
+      return `${title}.${ext}`;
+    }
+    return 'Attached Document';
+  };
+
+  const prepareLocalFile = async (sourceUri: string, defaultName: string): Promise<string> => {
+    if (sourceUri.startsWith('http://') || sourceUri.startsWith('https://')) {
+      const ext = sourceUri.split('?')[0].split('.').pop() || 'pdf';
+      const cleanName = `${defaultName.replace(/[^a-zA-Z0-9_-]/g, '_')}_${Date.now()}.${ext}`;
+      const localPath = `${FileSystem.cacheDirectory}${cleanName}`;
+      const downloadResult = await FileSystem.downloadAsync(sourceUri, localPath);
+      return downloadResult.uri;
+    }
+    return sourceUri;
+  };
+
+  const handleOpenInSystemApp = async () => {
+    if (!document?.originalImageUri) return;
     try {
-      await updateLeaseDocument(document.id, updates);
-      setIsEditing(false);
+      setIsPreparingFile(true);
+      const localUri = await prepareLocalFile(document.originalImageUri, document.title || 'document');
+      const mime = getMimeType(document.originalImageUri);
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(localUri, {
+          mimeType: mime,
+          dialogTitle: `Open ${document.title || 'Document'}`,
+          UTI: isPdfFile(document.originalImageUri) ? 'com.adobe.pdf' : undefined,
+        });
+      } else if (document.originalImageUri.startsWith('http://') || document.originalImageUri.startsWith('https://')) {
+        await WebBrowser.openBrowserAsync(document.originalImageUri);
+      } else {
+        Alert.alert('Preview', 'Document is saved on device.');
+      }
     } catch (error) {
-      console.error('Error updating lease document:', error);
-      const message = error instanceof Error ? error.message : 'Failed to update document. Please try again.';
-      Alert.alert('Error', message);
-    }
-  };
-
-  const handleCancel = () => {
-    setIsEditing(false);
-  };
-
-  const handleDelete = () => {
-    if (!document) return;
-
-    Alert.alert(
-      'Delete Document',
-      `Are you sure you want to delete "${document.title}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await deleteLeaseDocument(document.id);
-              router.back();
-            } catch (error) {
-              console.error('Error deleting lease document:', error);
-              const message = error instanceof Error ? error.message : 'Failed to delete document. Please try again.';
-              Alert.alert('Error', message);
-            }
-          }
-        }
-      ]
-    );
-  };
-
-  const handleExport = async () => {
-    if (!document) return;
-
-    try {
-      setIsExporting(true);
-      await exportLeaseDocument(document.id);
-    } catch (error) {
-      console.error('Export error:', error);
-      Alert.alert('Export Error', 'Failed to export document. Please try again.');
+      console.error('Error opening file in system app:', error);
+      Alert.alert('Open Failed', 'Could not open this file with external app.');
     } finally {
-      setIsExporting(false);
+      setIsPreparingFile(false);
+    }
+  };
+
+  const handleOpenInBrowser = async () => {
+    if (!document?.originalImageUri) return;
+    try {
+      if (document.originalImageUri.startsWith('http://') || document.originalImageUri.startsWith('https://')) {
+        await WebBrowser.openBrowserAsync(document.originalImageUri);
+      } else {
+        await handleOpenInSystemApp();
+      }
+    } catch (error) {
+      console.error('Error opening in browser:', error);
+      Alert.alert('Browser Error', 'Could not open document in web browser.');
+    }
+  };
+
+  const handleShareUploadedFile = async () => {
+    if (!document?.originalImageUri) return;
+
+    try {
+      setIsPreparingFile(true);
+      const localUri = await prepareLocalFile(document.originalImageUri, document.title || 'document');
+      const mime = getMimeType(document.originalImageUri);
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(localUri, {
+          mimeType: mime,
+          dialogTitle: `Share ${document.title || 'Document'}`,
+        });
+      } else {
+        Alert.alert('Share', 'Sharing is not supported on this device.');
+      }
+    } catch (error) {
+      console.error('Error sharing uploaded file:', error);
+      Alert.alert('Share Failed', 'Could not share this file.');
+    } finally {
+      setIsPreparingFile(false);
     }
   };
 
@@ -406,6 +440,68 @@ export default function LeaseDocumentScreen() {
             </View>
           ) : (
             <>
+              {!!document.originalImageUri && (
+                <View style={styles.uploadedFileContainer}>
+                  <View style={styles.uploadedFileHeader}>
+                    {isImageFile(document.originalImageUri) ? (
+                      <View style={styles.fileIconBadge}>
+                        <Image
+                          source={{ uri: document.originalImageUri }}
+                          style={styles.fileThumb}
+                          resizeMode="cover"
+                        />
+                      </View>
+                    ) : (
+                      <View style={styles.fileIconBadge}>
+                        <FileText size={22} color="#2563EB" />
+                      </View>
+                    )}
+                    <View style={styles.fileHeaderInfo}>
+                      <Text style={styles.uploadedFileTitle}>
+                        {isImageFile(document.originalImageUri) ? 'Attached Photo / Scan' : 'Attached Document'}
+                      </Text>
+                      <Text style={styles.uploadedFileName} numberOfLines={1}>
+                        {getCleanFileName(document.originalImageUri, document.title)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.uploadedFileActions}>
+                    <TouchableOpacity
+                      style={styles.uploadedFileButtonPrimary}
+                      onPress={() => setShowPreviewModal(true)}
+                    >
+                      <Eye size={16} color="#FFFFFF" />
+                      <Text style={styles.uploadedFileButtonPrimaryText}>View</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.uploadedFileButtonSecondary}
+                      onPress={handleOpenInSystemApp}
+                      disabled={isPreparingFile}
+                    >
+                      {isPreparingFile ? (
+                        <ActivityIndicator size="small" color="#2563EB" />
+                      ) : (
+                        <>
+                          <Printer size={16} color="#2563EB" />
+                          <Text style={styles.uploadedFileButtonSecondaryText}>Open / Print</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.uploadedFileButtonSecondary}
+                      onPress={handleShareUploadedFile}
+                      disabled={isPreparingFile}
+                    >
+                      <Share2 size={16} color="#2563EB" />
+                      <Text style={styles.uploadedFileButtonSecondaryText}>Share</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
               <Text style={styles.contentTitle}>Document Content</Text>
               <View style={styles.contentContainer}>
                 <Text style={styles.contentText}>{document.content}</Text>
@@ -423,6 +519,113 @@ export default function LeaseDocumentScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* In-App Preview Modal */}
+      {showPreviewModal && !!document.originalImageUri && (
+        <Modal
+          visible={showPreviewModal}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowPreviewModal(false)}
+        >
+          <SafeAreaView style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <View style={styles.modalHeaderTitleGroup}>
+                  <Text style={styles.modalTitle} numberOfLines={1}>
+                    {document.title || 'Document Preview'}
+                  </Text>
+                  <Text style={styles.modalSubtitle} numberOfLines={1}>
+                    {getCleanFileName(document.originalImageUri, document.title)}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.modalCloseButton}
+                  onPress={() => setShowPreviewModal(false)}
+                >
+                  <X size={22} color="#374151" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.modalBody}>
+                {isImageFile(document.originalImageUri) ? (
+                  <View style={styles.imagePreviewWrapper}>
+                    <Image
+                      source={{ uri: document.originalImageUri }}
+                      style={styles.fullImagePreview}
+                      resizeMode="contain"
+                    />
+                  </View>
+                ) : (
+                  <View style={styles.docPreviewPlaceholder}>
+                    <View style={styles.docLargeIconCircle}>
+                      <FileCheck size={48} color="#2563EB" />
+                    </View>
+                    <Text style={styles.docPlaceholderTitle}>
+                      {isPdfFile(document.originalImageUri) ? 'PDF Document Ready' : 'Document File Attached'}
+                    </Text>
+                    <Text style={styles.docPlaceholderSub}>
+                      Open with your device's PDF viewer, Google Drive, or system app to view full pages and print.
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.modalFooter}>
+                <TouchableOpacity
+                  style={styles.modalActionButtonPrimary}
+                  onPress={() => {
+                    setShowPreviewModal(false);
+                    handleOpenInSystemApp();
+                  }}
+                  disabled={isPreparingFile}
+                >
+                  {isPreparingFile ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Printer size={18} color="#FFFFFF" />
+                      <Text style={styles.modalActionButtonPrimaryText}>Open in Device App / Print</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                {Boolean(document.originalImageUri.startsWith('http://') || document.originalImageUri.startsWith('https://')) && (
+                  <TouchableOpacity
+                    style={styles.modalActionButtonSecondary}
+                    onPress={() => {
+                      setShowPreviewModal(false);
+                      handleOpenInBrowser();
+                    }}
+                  >
+                    <ExternalLink size={18} color="#2563EB" />
+                    <Text style={styles.modalActionButtonSecondaryText}>Open in Web Browser</Text>
+                  </TouchableOpacity>
+                )}
+
+                <View style={styles.modalSecondaryRow}>
+                  <TouchableOpacity
+                    style={styles.modalHalfButton}
+                    onPress={() => {
+                      setShowPreviewModal(false);
+                      handleShareUploadedFile();
+                    }}
+                  >
+                    <Share2 size={16} color="#4B5563" />
+                    <Text style={styles.modalHalfButtonText}>Share</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.modalHalfButton}
+                    onPress={() => setShowPreviewModal(false)}
+                  >
+                    <Text style={styles.modalHalfButtonText}>Close</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </SafeAreaView>
+        </Modal>
+      )}
 
       {/* Date Picker */}
       {showDatePicker && (
@@ -587,6 +790,235 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#92400E',
     lineHeight: 20,
+  },
+  uploadedFileContainer: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+  },
+  uploadedFileHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 14,
+  },
+  fileIconBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    backgroundColor: '#DBEAFE',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  fileThumb: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+  },
+  fileHeaderInfo: {
+    flex: 1,
+  },
+  uploadedFileTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1E3A8A',
+    marginBottom: 2,
+  },
+  uploadedFileName: {
+    fontSize: 13,
+    color: '#4B5563',
+  },
+  uploadedFileActions: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  uploadedFileButtonPrimary: {
+    backgroundColor: '#2563EB',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  uploadedFileButtonPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  uploadedFileButtonSecondary: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#93C5FD',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  uploadedFileButtonSecondaryText: {
+    color: '#1D4ED8',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    width: '100%',
+    maxWidth: 480,
+    maxHeight: '90%',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  modalHeaderTitleGroup: {
+    flex: 1,
+    marginRight: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 2,
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+  },
+  modalCloseButton: {
+    padding: 6,
+    borderRadius: 20,
+    backgroundColor: '#F3F4F6',
+  },
+  modalBody: {
+    minHeight: 220,
+    maxHeight: 380,
+    backgroundColor: '#F9FAFB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  imagePreviewWrapper: {
+    width: '100%',
+    height: 320,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullImagePreview: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  docPreviewPlaceholder: {
+    alignItems: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+  },
+  docLargeIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  docPlaceholderTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1F2937',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  docPlaceholderSub: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 20,
+    maxWidth: 320,
+  },
+  modalFooter: {
+    padding: 16,
+    gap: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    backgroundColor: '#FFFFFF',
+  },
+  modalActionButtonPrimary: {
+    backgroundColor: '#2563EB',
+    paddingVertical: 14,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  modalActionButtonPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  modalActionButtonSecondary: {
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingVertical: 12,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  modalActionButtonSecondaryText: {
+    color: '#1D4ED8',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalSecondaryRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 2,
+  },
+  modalHalfButton: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    paddingVertical: 11,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  modalHalfButtonText: {
+    color: '#374151',
+    fontSize: 14,
+    fontWeight: '600',
   },
   editForm: {
     marginTop: 8,

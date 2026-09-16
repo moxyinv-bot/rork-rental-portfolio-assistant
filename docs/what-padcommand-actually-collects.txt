@@ -1,0 +1,119 @@
+WHAT PADCOMMAND ACTUALLY COLLECTS - PLAIN ENGLISH SUMMARY
+(For your own understanding — not the legal Play Store policy)
+Last checked against the app code: September 15, 2026
+
+============================================================
+SHORT ANSWER
+============================================================
+PadCommand collects only what you type in or upload yourself
+(properties, money records, documents, photos, contacts, reminders,
+and your login email/name). It does NOT collect your location,
+does NOT record audio, does NOT read your phone's contact list,
+does NOT track you for ads, and does NOT contain any advertising
+or third-party analytics SDKs. Everything is stored in your own
+private household space in the cloud, protected by database rules
+that only let members of your household see it.
+
+============================================================
+WHAT THE APP DOES COLLECT (confirmed by reviewing the code)
+============================================================
+
+1. Account info
+   - Email address, display name, and profile picture ONLY if you
+     sign in with Google. If you sign in with email/password instead,
+     only your email and name are stored.
+   - Source: hooks/useAuth.tsx, lib/supabase.ts
+
+2. Property records you enter
+   - Address, purchase price, value, square footage, rent, mortgage
+     and insurance details, property tax due dates, appliances, paint
+     colors, notes. All of this is data YOU type in — the app does not
+     pull this from anywhere external.
+   - Source: hooks/portfolio-store.ts, types/property.ts
+
+3. Financial transactions you enter
+   - Income/expense amounts, categories, dates, descriptions, tags.
+   - Source: hooks/portfolio-store.ts (transactions table)
+
+4. Photos and documents YOU choose to upload
+   - Receipts, lease PDFs, property photos — only ones you pick from
+     your camera or your own device/Google Drive file picker. The app
+     cannot see your other photos or files; it only receives the
+     specific file you select in the picker dialog.
+   - Source: expo-image-picker / expo-document-picker usage in
+     add-transaction.tsx, create-lease-document.tsx, property/[id].tsx
+
+5. Contacts you manually type into "My Team"
+   - Name, phone, email, company, category, notes — typed in by you.
+   - IMPORTANT: This does NOT read your phone's real contacts list.
+     It is just a form you fill out inside the app.
+   - Source: hooks/portfolio-store.ts (household_contacts table)
+
+6. Reminders
+   - Titles and due dates for mortgage/insurance/lease/tax renewals.
+   - If you tap "add to calendar," the app writes ONE event to your
+     device calendar app. It does not read your existing calendar
+     events, only adds the ones you create.
+   - Source: expo-calendar usage, lib/reminder-notifications.ts
+
+============================================================
+WHAT THE APP DOES NOT COLLECT
+============================================================
+- NO GPS / location tracking (no location permission requested)
+- NO microphone / voice recording (no audio permission requested)
+- NO reading of your phone's actual contacts list
+- NO SMS, call log, or phone state access
+- NO background data collection while the app is closed
+- NO advertising ID collection
+- NO third-party analytics or ad SDKs bundled in the app
+- NO selling or sharing of your data with data brokers or advertisers
+
+Confirmed by checking android/app/src/main/AndroidManifest.xml —
+only these permissions exist in the released app:
+  CAMERA, INTERNET, READ_CALENDAR, WRITE_CALENDAR,
+  READ_MEDIA_IMAGES, READ_MEDIA_VISUAL_USER_SELECTED, VIBRATE,
+  plus two legacy storage permissions capped to old Android versions
+  only (for compatibility with very old phones).
+
+============================================================
+HOW YOUR DATA IS SECURED
+============================================================
+
+1. Encrypted in transit
+   - All requests between the app and the backend use HTTPS/TLS.
+     Source: lib/supabase.ts (createClient over https:// URL)
+
+2. Encrypted session storage on your device
+   - Your login session is stored using the device's secure storage
+     (Android Keystore-backed), not plain text.
+     Source: expo-secure-store usage in lib/supabase.ts
+
+3. Household-only data isolation (Row Level Security)
+   - The database enforces, at the database level (not just app code),
+     that a user can only read/write rows belonging to a household
+     they are a verified member of. This applies to properties,
+     transactions, receipts, reminders, lease documents, contacts,
+     and reminder delivery logs.
+     Source: supabase/migrations/20260901_production_rls_policies.sql
+     and the follow-up RLS fix migrations applied in September 2026.
+
+4. Private cloud file storage
+   - Uploaded photos/receipts/leases are stored in access-controlled
+     storage buckets, gated by the same household-membership check
+     used for the database — a person outside your household cannot
+     read your files even if they had a raw storage link.
+
+5. No hardcoded secrets in the client
+   - The publishable Supabase key baked into the app is the public
+     anon key (by design, safe to ship in an app), NOT an admin key.
+     Actual access is gated by the database security rules above,
+     not by hiding the key.
+
+============================================================
+BOTTOM LINE
+============================================================
+If you never granted the app camera/calendar/photo access, it has
+nothing beyond your account email/name. Everything else in the app
+is information you deliberately typed in, photographed, or uploaded,
+and it stays inside your private household's data — not shared,
+not sold, not used for ads.

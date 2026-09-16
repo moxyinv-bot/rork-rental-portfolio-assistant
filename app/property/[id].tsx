@@ -12,6 +12,7 @@ import {
   TextInput,
   Pressable,
   Platform,
+  Share,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { usePortfolio, usePropertyTransactions, usePropertyReceipts, usePropertyReminders, usePropertyPhotos } from "@/hooks/portfolio-store";
@@ -20,6 +21,7 @@ import * as ImagePicker from "expo-image-picker";
 import { Edit, Home, DollarSign, FileText, Bell, Plus, Trash2, Image as ImageIcon, Camera, X, MessageSquare, Mail, CalendarDays } from "lucide-react-native";
 import { Linking } from "react-native";
 import * as Calendar from "expo-calendar";
+import * as Sharing from "expo-sharing";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { formatDisplayDate, parseStoredDate } from "@/lib/dates";
 
@@ -295,6 +297,9 @@ export default function PropertyDetailsScreen() {
       if (property.insurancePolicy) lines.push(`Policy #: ${property.insurancePolicy}`);
       if (property.insurancePremium != null) lines.push(`Annual Premium: ${formatCurrency(property.insurancePremium)}`);
       if (property.insuranceRenewalDate) lines.push(`Renewal Date: ${formatDate(property.insuranceRenewalDate)}`);
+    } else if (reminder.title.toLowerCase().includes('property tax')) {
+      if (property.propertyTax != null) lines.push(`Property Tax: ${formatCurrency(property.propertyTax)}`);
+      if (property.propertyTaxDueDate) lines.push(`Tax Due Date: ${formatDate(property.propertyTaxDueDate)}`);
     }
 
     if (reminder.notes) {
@@ -302,6 +307,44 @@ export default function PropertyDetailsScreen() {
     }
 
     return lines.join('\n');
+  };
+
+  const openAttachedFile = async (uri: string) => {
+    try {
+      if (uri.startsWith('http://') || uri.startsWith('https://')) {
+        await Linking.openURL(uri);
+        return;
+      }
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { dialogTitle: 'Open or print file' });
+        return;
+      }
+
+      await Linking.openURL(uri);
+    } catch (error) {
+      console.error('Error opening attachment:', error);
+      Alert.alert('Open failed', 'Could not open this file on the device.');
+    }
+  };
+
+  const shareAttachedFile = async (uri: string, title: string) => {
+    try {
+      if (uri.startsWith('http://') || uri.startsWith('https://')) {
+        await Share.share({ title, message: uri, url: uri });
+        return;
+      }
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { dialogTitle: `Share ${title}` });
+        return;
+      }
+
+      await Share.share({ title, message: uri });
+    } catch (error) {
+      console.error('Error sharing attachment:', error);
+      Alert.alert('Share failed', 'Could not share this file from the device.');
+    }
   };
 
   const handleDelete = () => {
@@ -480,6 +523,12 @@ export default function PropertyDetailsScreen() {
                   <View style={styles.metricCard}>
                     <Text style={styles.metricLabel}>Property Tax /yr</Text>
                     <Text style={styles.metricValue}>{formatCurrency(property.propertyTax)}</Text>
+                  </View>
+                )}
+                {!!property.propertyTaxDueDate && (
+                  <View style={styles.metricCard}>
+                    <Text style={styles.metricLabel}>Tax Due</Text>
+                    <Text style={styles.metricValue}>{formatDate(property.propertyTaxDueDate)}</Text>
                   </View>
                 )}
               </View>
@@ -722,6 +771,24 @@ export default function PropertyDetailsScreen() {
                   <Text style={styles.transactionMeta}>
                     {transaction.category} • {formatTransactionDate(transaction.date)}
                   </Text>
+                  {!!transaction.receiptUri && (
+                    <View style={styles.attachmentActions}>
+                      <TouchableOpacity
+                        style={styles.attachmentButton}
+                        onPress={() => openAttachedFile(transaction.receiptUri!)}
+                      >
+                        <FileText size={14} color="#3B82F6" />
+                        <Text style={styles.attachmentButtonText}>Open / Print</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.attachmentButton}
+                        onPress={() => shareAttachedFile(transaction.receiptUri!, transaction.receiptName || transaction.description)}
+                      >
+                        <FileText size={14} color="#3B82F6" />
+                        <Text style={styles.attachmentButtonText}>Share</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               ))
             )}
@@ -820,6 +887,9 @@ export default function PropertyDetailsScreen() {
                     if (property.insurancePolicy) lines.push(`Policy #: ${property.insurancePolicy}`);
                     if (property.insurancePremium != null) lines.push(`Annual Premium: ${formatCurrency(property.insurancePremium)}`);
                     if (property.insuranceRenewalDate) lines.push(`Renewal Date: ${formatDate(property.insuranceRenewalDate)}`);
+                  } else if (reminder.title.toLowerCase().includes('property tax')) {
+                    if (property.propertyTax != null) lines.push(`\nProperty Tax: ${formatCurrency(property.propertyTax)}`);
+                    if (property.propertyTaxDueDate) lines.push(`Tax Due Date: ${formatDate(property.propertyTaxDueDate)}`);
                   }
 
                   if (reminder.notes) {
@@ -1306,6 +1376,28 @@ const styles = StyleSheet.create({
   transactionMeta: {
     fontSize: 12,
     color: "#6B7280",
+  },
+  attachmentActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 10,
+  },
+  attachmentButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    backgroundColor: "#EFF6FF",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 4,
+  },
+  attachmentButtonText: {
+    color: "#3B82F6",
+    fontSize: 12,
+    fontWeight: "600" as const,
   },
   documentsGrid: {
     flexDirection: "row",

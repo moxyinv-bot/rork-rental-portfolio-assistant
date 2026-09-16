@@ -2,7 +2,7 @@
   "expo": {
     "name": "PadCommand",
     "slug": "rental-portfolio-assistant",
-    "version": "1.0.5",
+    "version": "1.0.20",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "rork-7qnyyg8myr2908b1ajb2f",
@@ -24,12 +24,12 @@
       }
     },
     "android": {
-      "versionCode": 7,
+      "versionCode": 22,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "app.rork.rentalportfolioassistant",
+      "package": "pad.command_release",
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.CAMERA",
